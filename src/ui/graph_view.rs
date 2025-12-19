@@ -67,18 +67,23 @@ fn render_graph_line_with_commit<'a>(
             let style = Style::default().fg(color);
             spans.push(Span::styled(commit_char.to_string(), style));
         } else {
-            // 他のレーンは縦線またはスペース
-            // TODO: より正確なアクティブレーン追跡
-            spans.push(Span::styled("│", Style::default().fg(Color::DarkGray)));
+            // アクティブなレーンのみ縦線を描画
+            let is_active = node.active_lanes.get(col).copied().unwrap_or(false);
+            if is_active {
+                let col_color = get_lane_color(col);
+                spans.push(Span::styled("│", Style::default().fg(col_color)));
+            } else {
+                spans.push(Span::raw(" "));
+            }
         }
 
         // レーン間のスペース
         if col < max_lane {
-            // 接続線があれば横線を描画
+            // 接続線があれば横線または角を描画
             let has_horizontal = node.connections.iter().any(|conn| {
                 let min = conn.source_lane.min(conn.target_lane);
-                let max = conn.source_lane.max(conn.target_lane);
-                col >= min && col < max
+                let max_conn = conn.source_lane.max(conn.target_lane);
+                col >= min && col < max_conn
             });
 
             if has_horizontal {

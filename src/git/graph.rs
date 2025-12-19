@@ -33,6 +33,8 @@ pub struct GraphNode {
     pub lane: usize,
     pub row: usize,
     pub connections: Vec<Connection>,
+    /// この行でアクティブなレーン（縦線を描画するレーン）
+    pub active_lanes: Vec<bool>,
 }
 
 /// グラフレイアウト
@@ -135,11 +137,18 @@ pub fn build_graph(commits: &[CommitInfo]) -> GraphLayout {
 
         max_lane = max_lane.max(lane);
 
+        // この行でのアクティブレーン状態をコピー
+        let active_lanes_snapshot: Vec<bool> = active_lanes
+            .iter()
+            .map(|l| l.is_some())
+            .collect();
+
         nodes.push(GraphNode {
             commit: commit.clone(),
             lane,
             row,
             connections,
+            active_lanes: active_lanes_snapshot,
         });
     }
 
