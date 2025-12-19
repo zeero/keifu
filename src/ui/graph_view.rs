@@ -7,12 +7,18 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, ListState, StatefulWidget},
 };
+use unicode_width::UnicodeWidthStr;
 
 use crate::{
     app::{App, PaneFocus},
-    git::graph::GraphNode,
+    git::graph::{CellType, GraphNode},
     graph::colors::get_lane_color,
 };
+
+/// 文字列の表示幅を計算
+fn display_width(s: &str) -> usize {
+    UnicodeWidthStr::width(s)
+}
 
 pub struct GraphViewWidget<'a> {
     items: Vec<ListItem<'a>>,
@@ -20,9 +26,10 @@ pub struct GraphViewWidget<'a> {
 }
 
 impl<'a> GraphViewWidget<'a> {
-    pub fn new(app: &App) -> Self {
+    pub fn new(app: &App, width: u16) -> Self {
         let max_lane = app.graph_layout.max_lane;
-        let graph_width = (max_lane + 1) * 2 + 1;
+        // ボーダー分を引いた実際の幅
+        let inner_width = width.saturating_sub(2) as usize;
 
         let items: Vec<ListItem> = app
             .graph_layout
@@ -31,7 +38,7 @@ impl<'a> GraphViewWidget<'a> {
             .enumerate()
             .map(|(idx, node)| {
                 let is_selected = app.graph_list_state.selected() == Some(idx);
-                let line = render_graph_line_with_commit(node, max_lane, is_selected, graph_width);
+                let line = render_graph_line(node, max_lane, is_selected, inner_width);
                 ListItem::new(line)
             })
             .collect();
@@ -43,91 +50,143 @@ impl<'a> GraphViewWidget<'a> {
     }
 }
 
-fn render_graph_line_with_commit<'a>(
+/// ブランチ名の表示を最適化
+/// - ローカルブランチと対応するorigin/xxxが一致している場合は「xxx ↔ origin」と表示
+/// - それ以外は従来通り個別に表示
+fn optimize_branch_display(branch_names: &[String], is_head: bool) -> Vec<(String, Style)> {
+    use std::collections::HashSet;
+
+    if branch_names.is_empty() {
+        return Vec::new();
+    }
+
+    let mut result: Vec<(String, Style)> = Vec::new();
+    let mut processed_remotes: HashSet<String> = HashSet::new();
+
+    // ローカルブランチとリモートブランチを分離
+    let local_branches: Vec<&str> = branch_names
+        .iter()
+        .filter(|n| !n.starts_with("origin/"))
+        .map(|s| s.as_str())
+        .collect();
+    let remote_branches: HashSet<&str> = branch_names
+        .iter()
+        .filter(|n| n.starts_with("origin/"))
+        .map(|s| s.as_str())
+        .collect();
+
+    // ローカルブランチを処理
+    for (i, local) in local_branches.iter().enumerate() {
+        let remote_name = format!("origin/{}", local);
+        let has_matching_remote = remote_branches.contains(remote_name.as_str());
+
+        let style = if is_head && i == 0 {
+            Style::default().fg(Color::Black).bg(Color::Green).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::Black).bg(Color::Yellow)
+        };
+
+        if has_matching_remote {
+            // ローカルとリモートが一致 → 簡潔表示
+            result.push((format!("{} ↔ origin", local), style));
+            processed_remotes.insert(remote_name);
+        } else {
+            // ローカルのみ
+            result.push((local.to_string(), style));
+        }
+    }
+
+    // 対応するローカルがないリモートブランチを追加
+    for remote in branch_names.iter().filter(|n| n.starts_with("origin/")) {
+        if !processed_remotes.contains(remote) {
+            let style = Style::default().fg(Color::Black).bg(Color::Red);
+            result.push((remote.clone(), style));
+        }
+    }
+
+    result
+}
+
+/// 文字列を指定した表示幅で切り詰める
+fn truncate_to_width(s: &str, max_width: usize) -> String {
+    let mut result = String::new();
+    let mut current_width = 0;
+    for ch in s.chars() {
+        let ch_width = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+        if current_width + ch_width > max_width {
+            break;
+        }
+        result.push(ch);
+        current_width += ch_width;
+    }
+    result
+}
+
+fn render_graph_line<'a>(
     node: &GraphNode,
     max_lane: usize,
     is_selected: bool,
-    graph_width: usize,
+    total_width: usize,
 ) -> Line<'a> {
     let mut spans: Vec<Span> = Vec::new();
-    let lane = node.lane;
-    let color = get_lane_color(lane);
 
-    // グラフ部分を描画
-    for col in 0..=max_lane {
-        if col == lane {
-            // コミットノード
-            let commit_char = if node.is_head {
-                '◉'  // HEAD
-            } else if is_selected {
-                '●'
-            } else {
-                '○'
-            };
-            let style = if node.is_head {
-                Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(color)
-            };
-            spans.push(Span::styled(commit_char.to_string(), style));
-        } else {
-            // アクティブなレーンのみ縦線を描画
-            let is_active = node.active_lanes.get(col).copied().unwrap_or(false);
-            if is_active {
-                let col_color = get_lane_color(col);
-                spans.push(Span::styled("│", Style::default().fg(col_color)));
-            } else {
-                spans.push(Span::raw(" "));
-            }
-        }
-
-        // レーン間のスペースと接続線
-        if col < max_lane {
-            // このノードから他レーンへの接続があるか確認
-            let has_branch_out = node.connections.iter().any(|conn| {
-                conn.source_lane == lane && conn.target_lane > lane && col >= lane && col < conn.target_lane
-            });
-            let has_merge_in = node.connections.iter().any(|conn| {
-                conn.source_lane == lane && conn.target_lane < lane && col >= conn.target_lane && col < lane
-            });
-
-            if has_branch_out || has_merge_in {
-                spans.push(Span::styled("─", Style::default().fg(color)));
-            } else {
-                spans.push(Span::raw(" "));
-            }
-        }
-    }
-
-    // グラフ幅を揃えるためのパディング
-    let current_width: usize = spans.iter().map(|s| s.content.chars().count()).sum();
-    if current_width < graph_width {
-        spans.push(Span::raw(" ".repeat(graph_width - current_width)));
-    }
-
-    // セパレータ
+    // グラフ開始マーカー（境界線と区別するため）
     spans.push(Span::raw(" "));
+    let mut left_width: usize = 1;
 
-    // ブランチ名を表示（あれば）
-    if !node.branch_names.is_empty() {
-        for (i, name) in node.branch_names.iter().enumerate() {
-            if i > 0 {
-                spans.push(Span::raw(" "));
+    // セルを描画
+    for cell in &node.cells {
+        let (ch, color) = match cell {
+            CellType::Empty => (' ', Color::Reset),
+            CellType::Pipe(lane) => ('│', get_lane_color(*lane)),
+            CellType::Commit(lane) => {
+                // HEADは二重丸、それ以外は塗りつぶし丸
+                let ch = if node.is_head { '◉' } else { '●' };
+                (ch, if node.is_head { Color::Green } else { get_lane_color(*lane) })
             }
-            let branch_style = if node.is_head {
-                Style::default().fg(Color::Black).bg(Color::Green).add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(Color::Black).bg(Color::Yellow)
-            };
-            spans.push(Span::styled(format!(" {} ", name), branch_style));
-        }
-        spans.push(Span::raw(" "));
+            CellType::BranchRight(lane) => ('╭', get_lane_color(*lane)),
+            CellType::BranchLeft(lane) => ('╮', get_lane_color(*lane)),
+            CellType::MergeRight(lane) => ('╰', get_lane_color(*lane)),
+            CellType::MergeLeft(lane) => ('╯', get_lane_color(*lane)),
+            CellType::Horizontal(lane) => ('─', get_lane_color(*lane)),
+            CellType::HorizontalPipe(_h_lane, p_lane) => {
+                // 縦線と横線が交差（縦線の色を優先）
+                ('┼', get_lane_color(*p_lane))
+            }
+            CellType::TeeRight(lane) => ('├', get_lane_color(*lane)),
+            CellType::TeeLeft(lane) => ('┤', get_lane_color(*lane)),
+        };
+
+        // 罫線はすべてBOLDで太く表示
+        let style = Style::default().fg(color).add_modifier(Modifier::BOLD);
+
+        let ch_str = ch.to_string();
+        let ch_width = display_width(&ch_str);
+        spans.push(Span::styled(ch_str, style));
+        left_width += ch_width;
     }
 
-    // コミット情報
-    let commit = &node.commit;
+    // グラフ幅を揃えるためのパディング（表示幅ベース）
+    let graph_display_width = (max_lane + 1) * 2;
+    if left_width < graph_display_width + 1 {  // +1 は開始マーカー分
+        let padding = graph_display_width + 1 - left_width;
+        spans.push(Span::raw(" ".repeat(padding)));
+        left_width += padding;
+    }
+
+    // セパレータ（グラフとコミット情報の間）
+    spans.push(Span::raw(" "));
+    left_width += 1;
+
+    // コミットがない場合（接続行のみ）は早期リターン
+    let commit = match &node.commit {
+        Some(c) => c,
+        None => return Line::from(spans),
+    };
+
+    // スタイル定義
     let hash_style = Style::default().fg(Color::Yellow);
-    let author_style = Style::default().fg(Color::Blue);
+    let author_style = Style::default().fg(Color::Cyan);
     let date_style = Style::default().fg(Color::DarkGray);
     let msg_style = if is_selected {
         Style::default().add_modifier(Modifier::BOLD)
@@ -135,22 +194,60 @@ fn render_graph_line_with_commit<'a>(
         Style::default()
     };
 
-    spans.push(Span::styled(commit.short_id.clone(), hash_style));
-    spans.push(Span::raw(" "));
+    // === 左寄せ部分: ブランチ名 + メッセージ ===
 
-    // 著者名（最大8文字）
-    let author: String = commit.author_name.chars().take(8).collect();
-    spans.push(Span::styled(format!("{:<8}", author), author_style));
-    spans.push(Span::raw(" "));
+    // ブランチ名を最適化（local と origin/local が一致している場合は簡潔に表示）
+    let branch_display = optimize_branch_display(&node.branch_names, node.is_head);
 
-    // 日時
-    let date = commit.timestamp.format("%m-%d").to_string();
-    spans.push(Span::styled(date, date_style));
-    spans.push(Span::raw(" "));
+    // === 右寄せ部分: 日時 author hash（固定幅） ===
+    let date = commit.timestamp.format("%Y-%m-%d").to_string();  // 10文字
+    let author = truncate_to_width(&commit.author_name, 8);
+    let author_formatted = format!("{:<8}", author);  // 8文字固定
+    let hash = truncate_to_width(&commit.short_id, 7);
+    let hash_formatted = format!("{:<7}", hash);  // 7文字固定
 
-    // メッセージ
-    let message: String = commit.message.chars().take(40).collect();
+    // 右寄せ部分の固定幅: " YYYY-MM-DD  author    hash   "
+    // スペース1 + 日付10 + スペース2 + author8 + スペース2 + hash7 + スペース1 = 31
+    const RIGHT_FIXED_WIDTH: usize = 31;
+
+    // ブランチ名を表示
+    for (i, (label, style)) in branch_display.iter().enumerate() {
+        if i > 0 {
+            spans.push(Span::raw(" "));
+            left_width += 1;
+        }
+        let formatted = format!(" {} ", label);
+        left_width += display_width(&formatted);
+        spans.push(Span::styled(formatted, *style));
+    }
+    if !branch_display.is_empty() {
+        spans.push(Span::raw(" "));
+        left_width += 1;
+    }
+
+    // メッセージの最大幅を計算（利用可能な幅いっぱいまで使用）
+    let available_for_message = total_width
+        .saturating_sub(left_width)
+        .saturating_sub(RIGHT_FIXED_WIDTH);
+    let message = truncate_to_width(&commit.message, available_for_message);
+    let message_width = display_width(&message);
     spans.push(Span::styled(message, msg_style));
+    left_width += message_width;
+
+    // 右寄せのためのパディング（右寄せ部分が常に同じ位置から始まるように）
+    let padding = total_width.saturating_sub(left_width).saturating_sub(RIGHT_FIXED_WIDTH);
+    if padding > 0 {
+        spans.push(Span::raw(" ".repeat(padding)));
+    }
+
+    // === 右寄せ部分を追加（固定幅フォーマット） ===
+    spans.push(Span::raw(" "));
+    spans.push(Span::styled(date, date_style));
+    spans.push(Span::raw("  "));
+    spans.push(Span::styled(author_formatted, author_style));
+    spans.push(Span::raw("  "));
+    spans.push(Span::styled(hash_formatted, hash_style));
+    spans.push(Span::raw(" "));
 
     Line::from(spans)
 }

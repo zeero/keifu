@@ -250,8 +250,10 @@ impl App {
                     InputAction::CreateBranch => {
                         if !input.is_empty() {
                             if let Some(node) = self.selected_commit_node() {
-                                create_branch(&self.repo.repo, &input, node.commit.oid)?;
-                                self.refresh()?;
+                                if let Some(commit) = &node.commit {
+                                    create_branch(&self.repo.repo, &input, commit.oid)?;
+                                    self.refresh()?;
+                                }
                             }
                         }
                     }
@@ -380,8 +382,10 @@ impl App {
             }
             PaneFocus::Graph => {
                 if let Some(node) = self.selected_commit_node() {
-                    checkout_commit(&self.repo.repo, node.commit.oid)?;
-                    self.refresh()?;
+                    if let Some(commit) = &node.commit {
+                        checkout_commit(&self.repo.repo, commit.oid)?;
+                        self.refresh()?;
+                    }
                 }
             }
         }

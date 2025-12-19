@@ -20,7 +20,14 @@ impl<'a> CommitDetailWidget<'a> {
 
         if let Some(selected) = app.graph_list_state.selected() {
             if let Some(node) = app.graph_layout.nodes.get(selected) {
-                let commit = &node.commit;
+                // 接続行の場合はスキップ
+                let Some(commit) = &node.commit else {
+                    lines.push(Line::from(Span::styled(
+                        "（接続行）",
+                        Style::default().fg(Color::DarkGray),
+                    )));
+                    return Self { lines };
+                };
 
                 // コミットハッシュ
                 lines.push(Line::from(vec![

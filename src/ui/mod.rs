@@ -61,7 +61,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         &mut app.branch_list_state,
     );
     frame.render_stateful_widget(
-        GraphViewWidget::new(app),
+        GraphViewWidget::new(app, graph_area.width),
         graph_area,
         &mut app.graph_list_state,
     );
