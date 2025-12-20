@@ -74,7 +74,7 @@ fn test_linear_history() {
     ];
     let branches = vec![make_branch("main", "c3", true)];
 
-    let layout = build_graph(&commits, &branches);
+    let layout = build_graph(&commits, &branches, None, None);
 
     println!("Linear history:");
     for node in &layout.nodes {
@@ -105,7 +105,7 @@ fn test_simple_branch_merge() {
         make_branch("feature", "c2", false),
     ];
 
-    let layout = build_graph(&commits, &branches);
+    let layout = build_graph(&commits, &branches, None, None);
 
     println!("\nSimple branch merge:");
     for node in &layout.nodes {
@@ -154,7 +154,7 @@ fn test_multiple_merges() {
         make_branch("develop", "c2", false),
     ];
 
-    let layout = build_graph(&commits, &branches);
+    let layout = build_graph(&commits, &branches, None, None);
 
     println!("\nMultiple merges:");
     for node in &layout.nodes {
@@ -187,7 +187,7 @@ fn test_cell_structure() {
     ];
     let branches = vec![make_branch("main", "m1", true)];
 
-    let layout = build_graph(&commits, &branches);
+    let layout = build_graph(&commits, &branches, None, None);
 
     println!("\nCell structure analysis:");
     for node in &layout.nodes {
@@ -228,7 +228,7 @@ fn test_octopus_merge() {
         make_branch("branch-c", "C", false),
     ];
 
-    let layout = build_graph(&commits, &branches);
+    let layout = build_graph(&commits, &branches, None, None);
 
     println!("\nOctopus merge:");
     for node in &layout.nodes {
@@ -264,7 +264,7 @@ fn test_parallel_branches() {
     ];
     let branches = vec![make_branch("main", "M2", true)];
 
-    let layout = build_graph(&commits, &branches);
+    let layout = build_graph(&commits, &branches, None, None);
 
     println!("\nParallel branches:");
     for node in &layout.nodes {
@@ -303,7 +303,7 @@ fn test_many_active_lanes() {
         make_branch("d", "D", false),
     ];
 
-    let layout = build_graph(&commits, &branches);
+    let layout = build_graph(&commits, &branches, None, None);
 
     println!("\nMany active lanes:");
     for node in &layout.nodes {
@@ -320,5 +320,165 @@ fn test_many_active_lanes() {
         layout.max_lane >= 3,
         "Expected max_lane >= 3, got {}",
         layout.max_lane
+    );
+}
+
+#[test]
+fn test_chained_merges_different_branches() {
+    // Simulates the keifu-demo structure where:
+    // - cdd4866 (main) merges 0c8f4c0 and 41654ad
+    // - 0c8f4c0 merges 0e9a974 and 713c464
+    // - 334c592 (develop) merges 7e6637e and 41654ad
+    //
+    // The issue was that the line from cdd4866 to 0c8f4c0 was not drawn
+    // because the lane was incorrectly released when processing cdd4866.
+    //
+    // Structure (topological order):
+    // cdd4866 -> 0c8f4c0, 41654ad
+    // 334c592 -> 7e6637e, 41654ad
+    // 41654ad -> root
+    // 7e6637e -> root
+    // 0c8f4c0 -> root, 713c464
+    // 713c464 -> root
+    // root
+    let commits = vec![
+        make_commit("main-merge", vec!["feature-merge", "release"]),    // cdd4866
+        make_commit("develop-merge", vec!["develop", "release"]),       // 334c592
+        make_commit("release", vec!["root"]),                           // 41654ad
+        make_commit("develop", vec!["root"]),                           // 7e6637e
+        make_commit("feature-merge", vec!["root", "hotfix"]),           // 0c8f4c0
+        make_commit("hotfix", vec!["root"]),                            // 713c464
+        make_commit("root", vec![]),                                    // 0e9a974
+    ];
+    let branches = vec![
+        make_branch("main", "main-merge", false),
+        make_branch("develop", "develop-merge", true),
+    ];
+
+    let layout = build_graph(&commits, &branches, None, None);
+
+    println!("\nChained merges (keifu-demo structure):");
+    for node in &layout.nodes {
+        println!(
+            "  {} lane={} -> '{}'",
+            get_short_id(node),
+            node.lane,
+            render_cells(&node.cells)
+        );
+    }
+
+    // Find the main-merge and feature-merge nodes
+    let main_merge_idx = layout
+        .nodes
+        .iter()
+        .position(|n| n.commit.as_ref().map(|c| c.short_id == "main-merge").unwrap_or(false))
+        .expect("main-merge not found");
+    let feature_merge_idx = layout
+        .nodes
+        .iter()
+        .position(|n| n.commit.as_ref().map(|c| c.short_id == "feature-merge").unwrap_or(false))
+        .expect("feature-merge not found");
+
+    // Count the number of Pipe cells on the lane of main-merge between the two commits
+    let main_merge_lane = layout.nodes[main_merge_idx].lane;
+    let mut pipe_count = 0;
+    for idx in (main_merge_idx + 1)..feature_merge_idx {
+        let cell_idx = main_merge_lane * 2;
+        if let Some(cell) = layout.nodes[idx].cells.get(cell_idx) {
+            if matches!(cell, CellType::Pipe(_)) {
+                pipe_count += 1;
+            }
+        }
+    }
+
+    // There should be at least one Pipe connecting main-merge to feature-merge
+    // (This was the bug: the lane was released and no Pipe was drawn)
+    assert!(
+        pipe_count > 0 || main_merge_idx + 1 == feature_merge_idx,
+        "Expected Pipe cells connecting main-merge to feature-merge, got {} pipes between {} nodes",
+        pipe_count,
+        feature_merge_idx - main_merge_idx - 1
+    );
+}
+
+#[test]
+fn test_hotfix_merged_into_multiple_branches() {
+    // Simulates 713c464 scenario where a hotfix is merged into multiple branches:
+    // - ad98589 (release merge) merges a4b5efb and 713c464
+    // - 0c8f4c0 (main merge) merges 0e9a974 and 713c464
+    // 713c464 is a fork point (has 2 children) via second parent relationship
+    //
+    // Structure:
+    // release-merge -> version-bump, hotfix
+    // main-merge -> base, hotfix
+    // version-bump -> base
+    // hotfix -> base
+    // base (root)
+    let commits = vec![
+        make_commit("release-merge", vec!["version-bump", "hotfix"]), // ad98589
+        make_commit("main-merge", vec!["base", "hotfix"]),            // 0c8f4c0
+        make_commit("version-bump", vec!["base"]),                    // a4b5efb
+        make_commit("hotfix", vec!["base"]),                          // 713c464
+        make_commit("base", vec![]),                                  // root
+    ];
+    let branches = vec![
+        make_branch("release", "release-merge", false),
+        make_branch("main", "main-merge", true),
+        make_branch("hotfix", "hotfix", false),
+    ];
+
+    let layout = build_graph(&commits, &branches, None, None);
+
+    println!("\nHotfix merged into multiple branches:");
+    for node in &layout.nodes {
+        println!(
+            "  {} lane={} -> '{}'",
+            get_short_id(node),
+            node.lane,
+            render_cells(&node.cells)
+        );
+    }
+
+    // Find the hotfix node and main-merge node
+    let hotfix_idx = layout
+        .nodes
+        .iter()
+        .position(|n| n.commit.as_ref().map(|c| c.short_id == "hotfix").unwrap_or(false))
+        .expect("hotfix not found");
+    let main_merge_idx = layout
+        .nodes
+        .iter()
+        .position(|n| n.commit.as_ref().map(|c| c.short_id == "main-merge").unwrap_or(false))
+        .expect("main-merge not found");
+
+    // Check that main-merge row has a direct connection to hotfix
+    // The connection should be drawn directly on the commit row (TeeRight at the hotfix lane)
+    let main_merge_cells = &layout.nodes[main_merge_idx].cells;
+    let has_direct_connection = main_merge_cells
+        .iter()
+        .any(|c| matches!(c, CellType::TeeRight(_)));
+
+    assert!(
+        has_direct_connection,
+        "Expected direct connection (TeeRight) in main-merge row to hotfix lane. Cells: {:?}",
+        main_merge_cells
+    );
+
+    // Verify the line continues from main-merge to hotfix by checking for Pipe cells
+    let hotfix_lane = layout.nodes[hotfix_idx].lane;
+    let mut has_continuous_line = true;
+    for idx in (main_merge_idx + 1)..hotfix_idx {
+        let cell_idx = hotfix_lane * 2;
+        if let Some(cell) = layout.nodes[idx].cells.get(cell_idx) {
+            if !matches!(cell, CellType::Pipe(_) | CellType::Commit(_)) {
+                has_continuous_line = false;
+                break;
+            }
+        }
+    }
+
+    assert!(
+        has_continuous_line,
+        "Expected continuous Pipe line from main-merge to hotfix"
     );
 }

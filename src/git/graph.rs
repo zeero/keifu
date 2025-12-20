@@ -102,12 +102,14 @@ pub fn build_graph(
 
     // Detect fork points (commits with multiple children)
     // parent_oid -> list of child commits
+    // Check ALL parents, not just first parent, to detect fork points like
+    // hotfix branches that are merged into multiple release branches
     let mut parent_children: HashMap<Oid, Vec<Oid>> = HashMap::new();
     for commit in commits {
-        if let Some(first_parent) = commit.parent_oids.first() {
-            if oid_to_row.contains_key(first_parent) {
+        for parent_oid in &commit.parent_oids {
+            if oid_to_row.contains_key(parent_oid) {
                 parent_children
-                    .entry(*first_parent)
+                    .entry(*parent_oid)
                     .or_default()
                     .push(commit.oid);
             }
@@ -243,8 +245,8 @@ pub fn build_graph(
         }
 
         // Process parent commits
-        // (OID, lane, already tracked?, color index)
-        let mut parent_lanes: Vec<(Oid, usize, bool, usize)> = Vec::new();
+        // (OID, lane, already tracked?, color index, already shown?)
+        let mut parent_lanes: Vec<(Oid, usize, bool, usize, bool)> = Vec::new();
         let valid_parents: Vec<Oid> = commit
             .parent_oids
             .iter()
@@ -268,6 +270,11 @@ pub fn build_graph(
                 .iter()
                 .position(|l| l.map(|oid| oid == *parent_oid).unwrap_or(false));
 
+            // Check if parent commit has already been shown
+            let parent_already_shown = nodes
+                .iter()
+                .any(|n| n.commit.as_ref().map(|c| c.oid) == Some(*parent_oid));
+
             let (parent_lane, was_existing, parent_color) = if let Some(pl) = existing_parent_lane {
                 // If parent is a fork point, treat as fork sibling
                 if parent_idx == 0 && fork_points.contains(parent_oid) {
@@ -285,8 +292,12 @@ pub fn build_graph(
                     lane_color_index.insert(lane, color);
                     (lane, false, color)
                 } else {
-                    // Existing lane - use existing color
-                    let color = oid_color_index.get(parent_oid).copied().unwrap_or(pl);
+                    // Existing lane - use the lane's color (from lane_color_index)
+                    let color = lane_color_index
+                        .get(&pl)
+                        .copied()
+                        .or_else(|| oid_color_index.get(parent_oid).copied())
+                        .unwrap_or(pl);
                     (pl, true, color)
                 }
             } else if parent_idx == 0 {
@@ -310,7 +321,8 @@ pub fn build_graph(
                 (new_lane, false, new_color)
             };
 
-            parent_lanes.push((*parent_oid, parent_lane, was_existing, parent_color));
+            // Include parent_already_shown flag for proper symbol selection
+            parent_lanes.push((*parent_oid, parent_lane, was_existing, parent_color, parent_already_shown));
         }
 
         // Skip lane_merge for fork siblings
@@ -321,7 +333,7 @@ pub fn build_graph(
 
         // Update max_lane
         max_lane = max_lane.max(lane);
-        for &(_, pl, _, _) in &parent_lanes {
+        for &(_, pl, _, _, _) in &parent_lanes {
             max_lane = max_lane.max(pl);
         }
 
@@ -330,19 +342,15 @@ pub fn build_graph(
         // -> higher lane ends and merges into lower lane
         let lane_merge: Option<(usize, usize)> = parent_lanes
             .iter()
-            .find(|(_, pl, was_existing, _)| *was_existing && *pl != lane)
-            .map(|(_, pl, _, color)| (*pl, *color));
+            .find(|(_, pl, was_existing, _, _)| *was_existing && *pl != lane)
+            .map(|(_, pl, _, color, _)| (*pl, *color));
 
-        // Build cells for this row (exclude lines to was_existing parents; rendered in connector row)
-        let non_merging_parents: Vec<(Oid, usize, bool, usize)> = parent_lanes
-            .iter()
-            .filter(|(_, pl, was_existing, _)| !(*was_existing && *pl != lane))
-            .copied()
-            .collect();
+        // Build cells for this row
+        // Include ALL parents to draw connections directly on the commit row
         let cells = build_row_cells_with_colors(
             lane,
             final_color_index,
-            &non_merging_parents,
+            &parent_lanes,
             &lanes,
             &oid_color_index,
             &lane_color_index,
@@ -369,57 +377,47 @@ pub fn build_graph(
             cells,
         });
 
-        // Add a connector row after the commit row (when lanes merge)
-        // Connector row comes after the last commit of the ending lane
+        // Handle lane merging: when a parent is already tracked on a different lane
         if let Some((parent_lane, _)) = lane_merge {
-            // Lower lane is main (├), higher lane ends with merge (╯)
+            // Lower lane is main, higher lane is ending
             let (main_lane, ending_lane) = if parent_lane < lane {
                 (parent_lane, lane)
             } else {
                 (lane, parent_lane)
             };
 
-            let main_color = lanes
-                .get(main_lane)
-                .and_then(|o| *o)
-                .and_then(|oid| oid_color_index.get(&oid).copied())
-                .unwrap_or(main_lane);
-            let ending_color = oid_color_index
-                .get(&commit.oid)
-                .copied()
-                .unwrap_or(ending_lane);
+            // Check if the ending lane is tracking a commit that hasn't been shown yet
+            let ending_lane_oid = lanes.get(ending_lane).and_then(|o| *o);
+            let ending_oid_already_shown = ending_lane_oid
+                .map(|oid| {
+                    nodes
+                        .iter()
+                        .any(|n| n.commit.as_ref().map(|c| c.oid) == Some(oid))
+                })
+                .unwrap_or(true);
 
-            let connector_cells = build_connector_cells_with_colors(
-                main_lane,
-                main_color,
-                &[(ending_lane, ending_color)],
-                &lanes,
-                &oid_color_index,
-                &lane_color_index,
-                max_lane,
-            );
-            nodes.push(GraphNode {
-                commit: None,
-                lane: main_lane,
-                color_index: main_color,
-                branch_names: Vec::new(),
-                is_head: false,
-                is_uncommitted: false,
-                uncommitted_count: 0,
-                cells: connector_cells,
-            });
+            let continues_down = !ending_oid_already_shown;
 
-            // Release the ending lane
+            // Release the ending lane only if:
+            // 1. The first parent is NOT on the ending lane
+            // 2. The OID on ending lane has already been shown (not continuing downward)
             if ending_lane < lanes.len() {
-                // Move the ending lane OID into the main lane
-                if let Some(oid) = lanes[ending_lane] {
-                    if lanes.get(main_lane).map(|l| l.is_none()).unwrap_or(false) {
-                        lanes[main_lane] = Some(oid);
+                let first_parent_on_ending_lane = parent_lanes
+                    .first()
+                    .map(|(_, pl, _, _, _)| *pl == ending_lane)
+                    .unwrap_or(false);
+
+                if !first_parent_on_ending_lane && !continues_down {
+                    // Move the ending lane OID into the main lane
+                    if let Some(oid) = lanes[ending_lane] {
+                        if lanes.get(main_lane).map(|l| l.is_none()).unwrap_or(false) {
+                            lanes[main_lane] = Some(oid);
+                        }
                     }
+                    lanes[ending_lane] = None;
+                    color_assigner.release_lane(ending_lane);
+                    lane_color_index.remove(&ending_lane);
                 }
-                lanes[ending_lane] = None;
-                color_assigner.release_lane(ending_lane);
-                lane_color_index.remove(&ending_lane);
             }
         }
     }
@@ -551,73 +549,12 @@ pub fn build_graph(
     GraphLayout { nodes, max_lane }
 }
 
-/// Build connector row cells (merge row) - color index version
-fn build_connector_cells_with_colors(
-    main_lane: usize,
-    main_color: usize,
-    merging_lanes: &[(usize, usize)], // (lane, color_index)
-    active_lanes: &[Option<Oid>],
-    oid_color_index: &HashMap<Oid, usize>,
-    lane_color_index: &HashMap<usize, usize>,
-    max_lane: usize,
-) -> Vec<CellType> {
-    let mut cells = vec![CellType::Empty; (max_lane + 1) * 2];
-
-    // Draw a T junction on the main lane
-    let main_cell_idx = main_lane * 2;
-    if main_cell_idx < cells.len() {
-        cells[main_cell_idx] = CellType::TeeRight(main_color);
-    }
-
-    // List of merging lane numbers
-    let merging_lane_nums: Vec<usize> = merging_lanes.iter().map(|(l, _)| *l).collect();
-
-    // Draw vertical lines for active lanes (except main and merging lanes)
-    for (lane_idx, lane_oid) in active_lanes.iter().enumerate() {
-        if let Some(oid) = lane_oid {
-            if lane_idx != main_lane && !merging_lane_nums.contains(&lane_idx) {
-                let cell_idx = lane_idx * 2;
-                if cell_idx < cells.len() {
-                    let color = lane_color_index
-                        .get(&lane_idx)
-                        .copied()
-                        .or_else(|| oid_color_index.get(oid).copied())
-                        .unwrap_or(lane_idx);
-                    cells[cell_idx] = CellType::Pipe(color);
-                }
-            }
-        }
-    }
-
-    // Draw connectors to merging lanes
-    for &(merge_lane, merge_color) in merging_lanes {
-        // Horizontal line from main lane to merging lane
-        for col in (main_lane * 2 + 1)..(merge_lane * 2) {
-            if col < cells.len() {
-                let existing = cells[col];
-                if let CellType::Pipe(pl) = existing {
-                    cells[col] = CellType::HorizontalPipe(merge_color, pl);
-                } else if existing == CellType::Empty {
-                    cells[col] = CellType::Horizontal(merge_color);
-                }
-            }
-        }
-        // End of merge lane
-        let end_idx = merge_lane * 2;
-        if end_idx < cells.len() {
-            cells[end_idx] = CellType::MergeLeft(merge_color);
-        }
-    }
-
-    cells
-}
-
 /// Build cells for one row - color index version
-/// parent_lanes: (parent OID, lane, existing-tracked flag, color index)
+/// parent_lanes: (parent OID, lane, existing-tracked flag, color index, already-shown flag)
 fn build_row_cells_with_colors(
     commit_lane: usize,
     commit_color: usize,
-    parent_lanes: &[(Oid, usize, bool, usize)],
+    parent_lanes: &[(Oid, usize, bool, usize, bool)],
     active_lanes: &[Option<Oid>],
     oid_color_index: &HashMap<Oid, usize>,
     lane_color_index: &HashMap<usize, usize>,
@@ -650,7 +587,7 @@ fn build_row_cells_with_colors(
     }
 
     // Draw connections to parents
-    for &(_parent_oid, parent_lane, was_existing, parent_color) in parent_lanes.iter() {
+    for &(_parent_oid, parent_lane, was_existing, parent_color, already_shown) in parent_lanes.iter() {
         if parent_lane == commit_lane {
             // Same lane - only a vertical line (drawn on next row)
             continue;
@@ -673,37 +610,43 @@ fn build_row_cells_with_colors(
             // End marker
             let end_idx = parent_lane * 2;
             if end_idx < cells.len() {
-                if was_existing {
-                    // Already tracked: lane ends and merges ╯ (connect upward)
+                if was_existing && already_shown {
+                    // Parent already shown: lane ends and merges ╯ (connect upward)
                     cells[end_idx] = CellType::MergeLeft(parent_color);
+                } else if was_existing {
+                    // Parent not yet shown but lane exists: ┤ (T-junction, line continues down)
+                    cells[end_idx] = CellType::TeeLeft(parent_color);
                 } else {
-                    // New assignment: lane continues ╮ (continue downward)
+                    // New lane for parent: ╮ (branch starts here, continues down)
                     cells[end_idx] = CellType::BranchLeft(parent_color);
                 }
             }
         } else {
             // Branch end: connect to the left lane (main line)
             // Horizontal line to the left from the commit position
+            // Use the parent's color for the connection line
             for col in (parent_lane * 2 + 1)..(commit_lane * 2) {
                 if col < cells.len() {
                     let existing = cells[col];
                     if let CellType::Pipe(pl) = existing {
-                        cells[col] = CellType::HorizontalPipe(commit_color, pl);
+                        cells[col] = CellType::HorizontalPipe(parent_color, pl);
                     } else if existing == CellType::Empty {
-                        cells[col] = CellType::Horizontal(commit_color);
+                        cells[col] = CellType::Horizontal(parent_color);
                     }
                 }
             }
             // Start marker
             let start_idx = parent_lane * 2;
             if start_idx < cells.len() {
-                let existing = cells[start_idx];
-                if let CellType::Pipe(pl) = existing {
-                    // If a pipe exists, change to T junction (├)
-                    cells[start_idx] = CellType::TeeRight(pl);
-                } else if existing == CellType::Empty {
-                    // If empty, use merge mark (╰)
-                    cells[start_idx] = CellType::MergeRight(commit_color);
+                if was_existing && already_shown {
+                    // Parent already shown: lane ends and merges ╰ (connect upward)
+                    cells[start_idx] = CellType::MergeRight(parent_color);
+                } else if was_existing {
+                    // Parent not yet shown but lane exists: ├ (T-junction, line continues down)
+                    cells[start_idx] = CellType::TeeRight(parent_color);
+                } else {
+                    // New lane for parent: ╭ (branch starts here, continues down)
+                    cells[start_idx] = CellType::BranchRight(parent_color);
                 }
             }
         }
