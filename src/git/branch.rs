@@ -26,7 +26,11 @@ impl BranchInfo {
                 let reference = branch.get();
                 if let Some(oid) = reference.target() {
                     let is_head = head_oid.map(|h| h == oid).unwrap_or(false)
-                        && repo.head().ok().and_then(|h| h.shorthand().map(|s| s == name)).unwrap_or(false);
+                        && repo
+                            .head()
+                            .ok()
+                            .and_then(|h| h.shorthand().map(|s| s == name))
+                            .unwrap_or(false);
 
                     let upstream = branch
                         .upstream()

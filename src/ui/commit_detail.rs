@@ -159,7 +159,10 @@ impl<'a> CommitDetailWidget<'a> {
         if diff.truncated {
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
-                format!("  ...and {} more files", diff.total_files - diff.files.len()),
+                format!(
+                    "  ...and {} more files",
+                    diff.total_files - diff.files.len()
+                ),
                 Style::default().fg(Color::DarkGray),
             )));
         }

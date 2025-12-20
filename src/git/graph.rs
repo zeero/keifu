@@ -161,7 +161,8 @@ pub fn build_graph(commits: &[CommitInfo], branches: &[BranchInfo]) -> GraphLayo
                 .filter(|&&l| l != main_lane)
                 .map(|&l| {
                     // Use lane color, else OID color, else lane index
-                    let color = lane_color_index.get(&l)
+                    let color = lane_color_index
+                        .get(&l)
                         .copied()
                         .or_else(|| oid_color_index.get(&commit.oid).copied())
                         .unwrap_or(l);
@@ -175,7 +176,8 @@ pub fn build_graph(commits: &[CommitInfo], branches: &[BranchInfo]) -> GraphLayo
             }
             max_lane = max_lane.max(main_lane);
 
-            let main_color = lane_color_index.get(&main_lane)
+            let main_color = lane_color_index
+                .get(&main_lane)
                 .copied()
                 .or_else(|| oid_color_index.get(&commit.oid).copied())
                 .unwrap_or(main_lane);
@@ -435,7 +437,8 @@ fn build_connector_cells_with_colors(
             if lane_idx != main_lane && !merging_lane_nums.contains(&lane_idx) {
                 let cell_idx = lane_idx * 2;
                 if cell_idx < cells.len() {
-                    let color = lane_color_index.get(&lane_idx)
+                    let color = lane_color_index
+                        .get(&lane_idx)
                         .copied()
                         .or_else(|| oid_color_index.get(oid).copied())
                         .unwrap_or(lane_idx);
@@ -488,7 +491,8 @@ fn build_row_cells_with_colors(
                 let cell_idx = lane_idx * 2;
                 if cell_idx < cells.len() {
                     // Prefer lane color, else OID color, else lane index
-                    let color = lane_color_index.get(&lane_idx)
+                    let color = lane_color_index
+                        .get(&lane_idx)
                         .copied()
                         .or_else(|| oid_color_index.get(oid).copied())
                         .unwrap_or(lane_idx);
@@ -596,7 +600,8 @@ fn build_fork_connector_cells(
             if lane_idx != main_lane && !merging_lane_nums.contains(&lane_idx) {
                 let cell_idx = lane_idx * 2;
                 if cell_idx < cells.len() {
-                    let color = lane_color_index.get(&lane_idx)
+                    let color = lane_color_index
+                        .get(&lane_idx)
                         .copied()
                         .or_else(|| oid_color_index.get(oid).copied())
                         .unwrap_or(lane_idx);

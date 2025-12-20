@@ -64,9 +64,9 @@ impl CommitDiffInfo {
 
         // Generate diff (performance options)
         let mut opts = DiffOptions::new();
-        opts.minimal(false);           // Skip minimal diff calculation
-        opts.ignore_submodules(true);  // Skip submodules
-        opts.context_lines(0);         // Set context lines to 0
+        opts.minimal(false); // Skip minimal diff calculation
+        opts.ignore_submodules(true); // Skip submodules
+        opts.context_lines(0); // Set context lines to 0
 
         let diff = repo.diff_tree_to_tree(old_tree.as_ref(), Some(&new_tree), Some(&mut opts))?;
 
@@ -78,7 +78,8 @@ impl CommitDiffInfo {
         let truncated = total_files > MAX_FILES_TO_DISPLAY;
 
         // Collect file info (up to limit)
-        let mut files: Vec<FileDiffInfo> = Vec::with_capacity(MAX_FILES_TO_DISPLAY.min(total_files));
+        let mut files: Vec<FileDiffInfo> =
+            Vec::with_capacity(MAX_FILES_TO_DISPLAY.min(total_files));
 
         for delta_idx in 0..total_files.min(MAX_FILES_TO_DISPLAY) {
             let delta = diff.get_delta(delta_idx).unwrap();

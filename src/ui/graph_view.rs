@@ -50,7 +50,11 @@ impl<'a> GraphViewWidget<'a> {
 /// - If a local branch matches its origin/xxx, show "xxx <-> origin"
 /// - Otherwise, show each name separately
 /// - Render in bold with the graph color, wrapped in brackets
-fn optimize_branch_display(branch_names: &[String], is_head: bool, color_index: usize) -> Vec<(String, Style)> {
+fn optimize_branch_display(
+    branch_names: &[String],
+    is_head: bool,
+    color_index: usize,
+) -> Vec<(String, Style)> {
     use std::collections::HashSet;
 
     if branch_names.is_empty() {
@@ -178,7 +182,8 @@ fn render_graph_line<'a>(
 
     // Padding to align graph width (display width based)
     let graph_display_width = (max_lane + 1) * 2;
-    if left_width < graph_display_width + 1 {  // +1 accounts for the start marker
+    if left_width < graph_display_width + 1 {
+        // +1 accounts for the start marker
         let padding = graph_display_width + 1 - left_width;
         spans.push(Span::raw(" ".repeat(padding)));
         left_width += padding;
@@ -207,14 +212,15 @@ fn render_graph_line<'a>(
     // === Left-aligned: branch names + message ===
 
     // Optimize branch names (compact when local matches origin/local)
-    let branch_display = optimize_branch_display(&node.branch_names, node.is_head, node.color_index);
+    let branch_display =
+        optimize_branch_display(&node.branch_names, node.is_head, node.color_index);
 
     // === Right-aligned: date author hash (fixed width) ===
-    let date = commit.timestamp.format("%Y-%m-%d").to_string();  // 10 chars
+    let date = commit.timestamp.format("%Y-%m-%d").to_string(); // 10 chars
     let author = truncate_to_width(&commit.author_name, 8);
-    let author_formatted = format!("{:<8}", author);  // fixed 8 chars
+    let author_formatted = format!("{:<8}", author); // fixed 8 chars
     let hash = truncate_to_width(&commit.short_id, 7);
-    let hash_formatted = format!("{:<7}", hash);  // fixed 7 chars
+    let hash_formatted = format!("{:<7}", hash); // fixed 7 chars
 
     // Fixed width for right-aligned part: " YYYY-MM-DD  author    hash   "
     // Space1 + date10 + space2 + author8 + space2 + hash7 + space1 = 31
@@ -244,7 +250,9 @@ fn render_graph_line<'a>(
     left_width += message_width;
 
     // Padding so the right-aligned block starts at a fixed column
-    let padding = total_width.saturating_sub(left_width).saturating_sub(RIGHT_FIXED_WIDTH);
+    let padding = total_width
+        .saturating_sub(left_width)
+        .saturating_sub(RIGHT_FIXED_WIDTH);
     if padding > 0 {
         spans.push(Span::raw(" ".repeat(padding)));
     }

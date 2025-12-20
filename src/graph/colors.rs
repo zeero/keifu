@@ -14,7 +14,7 @@ pub const LANE_COLORS: [Color; 11] = [
     Color::LightGreen,
     Color::LightMagenta,
     Color::LightYellow,
-    Color::LightBlue,  // Main branch
+    Color::LightBlue, // Main branch
     Color::LightRed,
 ];
 

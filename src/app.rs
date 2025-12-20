@@ -13,7 +13,10 @@ use crate::{
     git::{
         build_graph,
         graph::GraphLayout,
-        operations::{checkout_branch, checkout_commit, checkout_remote_branch, create_branch, delete_branch, merge_branch, rebase_branch},
+        operations::{
+            checkout_branch, checkout_commit, checkout_remote_branch, create_branch, delete_branch,
+            merge_branch, rebase_branch,
+        },
         BranchInfo, CommitDiffInfo, CommitInfo, GitRepository,
     },
 };
@@ -311,9 +314,11 @@ impl App {
 
     fn handle_input_action(&mut self, action: Action) -> Result<()> {
         let (title, input, input_action) = match &self.mode {
-            AppMode::Input { title, input, action } => {
-                (title.clone(), input.clone(), action.clone())
-            }
+            AppMode::Input {
+                title,
+                input,
+                action,
+            } => (title.clone(), input.clone(), action.clone()),
             _ => return Ok(()),
         };
 

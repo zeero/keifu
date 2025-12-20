@@ -6,7 +6,11 @@ use git_graph_tui::git::{build_graph, graph::CellType, BranchInfo, CommitInfo};
 
 fn make_oid(id: &str) -> Oid {
     // Convert id into a 40-char hex hash
-    let hash = format!("{:0>40x}", id.bytes().fold(0u128, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u128)));
+    let hash = format!(
+        "{:0>40x}",
+        id.bytes()
+            .fold(0u128, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u128))
+    );
     Oid::from_str(&hash[..40]).unwrap()
 }
 
@@ -19,7 +23,7 @@ fn make_commit(id: &str, parents: Vec<&str>) -> CommitInfo {
         timestamp: Local::now(),
         message: format!("Commit {}", id),
         full_message: format!("Commit {}", id),
-        parent_oids: parents.into_iter().map(|p| make_oid(p)).collect(),
+        parent_oids: parents.into_iter().map(make_oid).collect(),
     }
 }
 
@@ -118,11 +122,11 @@ fn test_simple_branch_merge() {
 
     // C4 should be in lane 0 with a branch to C2
     assert_eq!(commit_nodes[0].lane, 0); // C4
-    // C3 should be in lane 0
+                                         // C3 should be in lane 0
     assert_eq!(commit_nodes[1].lane, 0); // C3
-    // C2 should be in lane 1 (separate branch)
+                                         // C2 should be in lane 1 (separate branch)
     assert_eq!(commit_nodes[2].lane, 1); // C2
-    // C1 should be in lane 0
+                                         // C1 should be in lane 0
     assert_eq!(commit_nodes[3].lane, 0); // C1
 }
 
@@ -197,9 +201,9 @@ fn test_cell_structure() {
     // m1 is a commit on lane 0 with a branch line to lane 1
     // CellType stores color indices, so only validate the cell type
     assert!(
-        matches!(m1_cells.get(0), Some(CellType::Commit(_))),
+        matches!(m1_cells.first(), Some(CellType::Commit(_))),
         "m1 cell[0] should be Commit, got {:?}",
-        m1_cells.get(0)
+        m1_cells.first()
     );
 }
 
@@ -312,5 +316,9 @@ fn test_many_active_lanes() {
     }
 
     // max_lane should be at least 3 (4 branches merge)
-    assert!(layout.max_lane >= 3, "Expected max_lane >= 3, got {}", layout.max_lane);
+    assert!(
+        layout.max_lane >= 3,
+        "Expected max_lane >= 3, got {}",
+        layout.max_lane
+    );
 }

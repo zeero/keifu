@@ -21,9 +21,7 @@ pub fn checkout_branch(repo: &Repository, branch_name: &str) -> Result<()> {
 
 /// Checkout a commit (detached HEAD)
 pub fn checkout_commit(repo: &Repository, oid: Oid) -> Result<()> {
-    let commit = repo
-        .find_commit(oid)
-        .context("Commit not found")?;
+    let commit = repo.find_commit(oid).context("Commit not found")?;
     let tree = commit.tree()?;
 
     repo.checkout_tree(tree.as_object(), None)?;
@@ -84,9 +82,7 @@ pub fn checkout_remote_branch(repo: &Repository, remote_branch: &str) -> Result<
 
 /// Create a new branch
 pub fn create_branch(repo: &Repository, branch_name: &str, from_oid: Oid) -> Result<()> {
-    let commit = repo
-        .find_commit(from_oid)
-        .context("Commit not found")?;
+    let commit = repo.find_commit(from_oid).context("Commit not found")?;
 
     repo.branch(branch_name, &commit, false)
         .context(format!("Failed to create branch '{}'", branch_name))?;
