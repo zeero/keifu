@@ -10,7 +10,6 @@ git-graph-tui is a terminal UI tool that visualizes Git commit graphs. It shows 
 - Commit list with branch labels, date, author, short hash, and message
 - Commit detail panel with full message and changed file stats (+/-)
 - Git operations: checkout, create/delete branch, merge, rebase
-- Text output mode for piping (`--text`)
 
 ## Requirements
 
@@ -37,20 +36,6 @@ Run inside a Git repository:
 
 ```bash
 git-graph-tui
-```
-
-Text output (non-interactive):
-
-```bash
-git-graph-tui --text
-```
-
-Example `--text` output:
-
-```
- ○──● 3a1b2c3 Fix foo [main]
- │
- ○──● 9d8e7f6 Add bar
 ```
 
 ## Keybindings
@@ -88,7 +73,7 @@ Example `--text` output:
 
 ## Notes and limitations
 
-- The TUI loads up to 500 commits across all branches; `--text` prints the latest 50.
+- The TUI loads up to 500 commits across all branches.
 - Merge commits are diffed against the first parent; the initial commit is diffed against an empty tree.
 - Changed files are capped at 50 and binary files are skipped.
 - Checking out `origin/xxx` creates or updates a local branch and sets its upstream. If the local branch exists but points to a different commit, it is force-updated to match the remote.
