@@ -1,4 +1,4 @@
-//! git-graph-tui library
+//! keifu library
 
 pub mod action;
 pub mod app;
