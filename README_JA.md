@@ -19,6 +19,14 @@ keifu (系譜, /keːɸɯ/) は、ターミナル上で Git のコミットグラ
 
 ## インストール
 
+### crates.io から
+
+```bash
+cargo install keifu
+```
+
+### ソースから
+
 ```bash
 cargo install --path .
 ```

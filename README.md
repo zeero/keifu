@@ -19,6 +19,14 @@ keifu (系譜, /keːɸɯ/) is a terminal UI tool that visualizes Git commit grap
 
 ## Installation
 
+### From crates.io
+
+```bash
+cargo install keifu
+```
+
+### From source
+
 ```bash
 cargo install --path .
 ```
