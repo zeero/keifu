@@ -48,6 +48,7 @@ fn render_cells(cells: &[CellType]) -> String {
             CellType::HorizontalPipe(_, _) => '┼',
             CellType::TeeRight(_) => '├',
             CellType::TeeLeft(_) => '┤',
+            CellType::TeeUp(_) => '┴',
         })
         .collect()
 }

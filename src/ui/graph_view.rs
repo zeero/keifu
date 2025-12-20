@@ -149,6 +149,7 @@ fn render_graph_line<'a>(
             }
             CellType::TeeRight(color_idx) => ('├', get_color_by_index(*color_idx)),
             CellType::TeeLeft(color_idx) => ('┤', get_color_by_index(*color_idx)),
+            CellType::TeeUp(color_idx) => ('┴', get_color_by_index(*color_idx)),
         };
 
         // 罫線はすべてBOLDで太く表示
