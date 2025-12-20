@@ -37,17 +37,19 @@ impl<'a> Widget for StatusBar<'a> {
             .fg(Color::Black)
             .bg(Color::Yellow)
             .add_modifier(Modifier::BOLD);
+        let repo_style = Style::default()
+            .fg(Color::Black)
+            .bg(Color::Magenta)
+            .add_modifier(Modifier::BOLD);
 
         let mut spans: Vec<Span> = Vec::new();
 
-        // モード表示
-        let mode_text = match self.mode {
-            AppMode::Normal => " NORMAL ",
-            AppMode::Help => " HELP ",
-            AppMode::Input { .. } => " INPUT ",
-            AppMode::Confirm { .. } => " CONFIRM ",
-        };
-        spans.push(Span::styled(mode_text, mode_style));
+        // リポジトリ名（フォルダ名）を左端に表示
+        let repo_name = std::path::Path::new(self.repo_path)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(self.repo_path);
+        spans.push(Span::styled(format!(" {} ", repo_name), repo_style));
         spans.push(Span::raw(" "));
 
         // HEADブランチ
@@ -98,17 +100,17 @@ impl<'a> Widget for StatusBar<'a> {
         let line = Line::from(spans);
         buf.set_line(area.x, area.y, &line, area.width);
 
-        // 右端にリポジトリパス
-        let path_text = format!(" {} ", self.repo_path);
-        let path_len = path_text.len() as u16;
-        if area.width > path_len {
-            let x = area.x + area.width - path_len;
-            buf.set_string(
-                x,
-                area.y,
-                &path_text,
-                Style::default().fg(Color::DarkGray),
-            );
+        // 右端にモード表示
+        let mode_text = match self.mode {
+            AppMode::Normal => " NORMAL ",
+            AppMode::Help => " HELP ",
+            AppMode::Input { .. } => " INPUT ",
+            AppMode::Confirm { .. } => " CONFIRM ",
+        };
+        let mode_len = mode_text.len() as u16;
+        if area.width > mode_len {
+            let x = area.x + area.width - mode_len;
+            buf.set_string(x, area.y, mode_text, mode_style);
         }
     }
 }
