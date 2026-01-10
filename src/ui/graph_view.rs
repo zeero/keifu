@@ -16,8 +16,14 @@ use crate::{
 };
 
 /// Calculate display width of a string
+/// Accounts for emoji variation selectors (U+FE0F) which cause preceding
+/// characters to display as 2-width emoji in terminals
 fn display_width(s: &str) -> usize {
-    UnicodeWidthStr::width(s)
+    let base_width = UnicodeWidthStr::width(s);
+    // Count variation selectors - each one adds 1 to width
+    // because the preceding character becomes a 2-width emoji
+    let variation_selectors = s.chars().filter(|&c| c == '\u{FE0F}').count();
+    base_width + variation_selectors
 }
 
 pub struct GraphViewWidget<'a> {
@@ -89,9 +95,8 @@ fn optimize_branch_display(
 
     // Style: bold with the graph color index
     // Main branch (blue) stays blue; other HEADs are green
-    let base_color = if color_index == crate::graph::colors::MAIN_BRANCH_COLOR {
-        get_color_by_index(color_index) // Main branch is always blue
-    } else if is_head {
+    let is_main_branch = color_index == crate::graph::colors::MAIN_BRANCH_COLOR;
+    let base_color = if is_head && !is_main_branch {
         Color::Green
     } else {
         get_color_by_index(color_index)
@@ -111,6 +116,9 @@ fn optimize_branch_display(
         }
     };
 
+    // Max width for a single branch label (e.g., "[fix/feature-name]")
+    const MAX_BRANCH_LABEL_WIDTH: usize = 40;
+
     // Handle local branches
     for local in local_branches.iter() {
         let remote_name = format!("origin/{}", local);
@@ -119,11 +127,25 @@ fn optimize_branch_display(
 
         if has_matching_remote {
             // Local and remote match -> compact display
-            result.push((format!("[{} ↔ origin]", local), style));
+            let label = format!("[{} ↔ origin]", local);
+            // "↔" is displayed as 2 chars in terminal but unicode_width counts it as 1
+            let label = if display_width(&label) > MAX_BRANCH_LABEL_WIDTH {
+                abbreviate_branch_label(local, MAX_BRANCH_LABEL_WIDTH - 11, 0)
+                    .replace("]", " ↔ origin]")
+            } else {
+                label
+            };
+            result.push((label, style));
             processed_remotes.insert(remote_name);
         } else {
             // Local only
-            result.push((format!("[{}]", local), style));
+            let label = format!("[{}]", local);
+            let label = if display_width(&label) > MAX_BRANCH_LABEL_WIDTH {
+                abbreviate_branch_label(local, MAX_BRANCH_LABEL_WIDTH, 0)
+            } else {
+                label
+            };
+            result.push((label, style));
         }
     }
 
@@ -131,19 +153,68 @@ fn optimize_branch_display(
     for remote in branch_names.iter().filter(|n| n.starts_with("origin/")) {
         if !processed_remotes.contains(remote) {
             let style = make_style(remote);
-            result.push((format!("[{}]", remote), style));
+            let label = format!("[{}]", remote);
+            let label = if display_width(&label) > MAX_BRANCH_LABEL_WIDTH {
+                abbreviate_branch_label(remote, MAX_BRANCH_LABEL_WIDTH, 0)
+            } else {
+                label
+            };
+            result.push((label, style));
         }
+    }
+
+    // If multiple branches, collapse to single + count (always compact)
+    if result.len() > 1 {
+        // Find the selected branch index by matching the original branch name
+        // The result order matches: local branches first, then remote-only branches
+        let selected_idx = selected_branch_name
+            .and_then(|sel| {
+                // Try local branches first (indices 0..local_branches.len())
+                local_branches
+                    .iter()
+                    .position(|&name| name == sel)
+                    // Then try remote-only branches (indices after locals)
+                    .or_else(|| {
+                        result
+                            .iter()
+                            .skip(local_branches.len())
+                            .position(|(label, _)| {
+                                // Check if label contains the selected branch name
+                                label.contains(sel)
+                            })
+                            .map(|pos| local_branches.len() + pos)
+                    })
+            })
+            .unwrap_or(0);
+
+        let (label, style) = &result[selected_idx];
+        let extra_count = result.len() - 1;
+        // Extract clean name from label
+        let clean_name = label
+            .trim_start_matches('[')
+            .split([']', ' '])
+            .next()
+            .unwrap_or(label);
+        let abbreviated = abbreviate_branch_label(clean_name, MAX_BRANCH_LABEL_WIDTH, extra_count);
+
+        return vec![(abbreviated, *style)];
     }
 
     result
 }
 
 /// Truncate a string to the specified display width
+/// Accounts for emoji variation selectors (U+FE0F)
 fn truncate_to_width(s: &str, max_width: usize) -> String {
     let mut result = String::new();
     let mut current_width = 0;
     for ch in s.chars() {
-        let ch_width = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+        // Variation selector adds 1 to width (makes preceding char 2-width emoji)
+        let ch_width = if ch == '\u{FE0F}' {
+            1
+        } else {
+            unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0)
+        };
         if current_width + ch_width > max_width {
             break;
         }
@@ -151,6 +222,61 @@ fn truncate_to_width(s: &str, max_width: usize) -> String {
         current_width += ch_width;
     }
     result
+}
+
+/// Abbreviate branch name to max_width, showing "+N" if more branches exist
+/// Uses format: prefix/head...tail (preserving last 5 chars)
+fn abbreviate_branch_label(name: &str, max_width: usize, extra_count: usize) -> String {
+    const TAIL_LEN: usize = 5;
+    const ELLIPSIS: &str = "...";
+
+    let suffix = if extra_count > 0 {
+        format!(" +{}", extra_count)
+    } else {
+        String::new()
+    };
+
+    let suffix_len = display_width(&suffix);
+    let available = max_width.saturating_sub(suffix_len).saturating_sub(2); // -2 for brackets
+
+    // If name fits, return as-is
+    if display_width(name) <= available {
+        return format!("[{}]{}", name, suffix);
+    }
+
+    // Find "/" position to preserve prefix
+    let slash_pos = name.find('/');
+
+    // Split into prefix and rest
+    let (prefix, rest) = match slash_pos {
+        Some(pos) => (&name[..=pos], &name[pos + 1..]),
+        None => ("", name),
+    };
+
+    let prefix_width = display_width(prefix);
+    let ellipsis_width = display_width(ELLIPSIS);
+
+    // Get last TAIL_LEN characters from rest
+    let rest_chars: Vec<char> = rest.chars().collect();
+    let tail: String = if rest_chars.len() > TAIL_LEN {
+        rest_chars[rest_chars.len() - TAIL_LEN..].iter().collect()
+    } else {
+        rest.to_string()
+    };
+    let tail_width = display_width(&tail);
+
+    // Calculate available width for head portion
+    let head_available = available.saturating_sub(prefix_width + ellipsis_width + tail_width);
+
+    if head_available == 0 {
+        // Not enough space for head, just show truncated name
+        let truncated = truncate_to_width(name, available.saturating_sub(3));
+        return format!("[{}...]{}", truncated, suffix);
+    }
+
+    let head = truncate_to_width(rest, head_available);
+
+    format!("[{}{}{}{}]{}", prefix, head, ELLIPSIS, tail, suffix)
 }
 
 fn render_graph_line<'a>(
@@ -175,9 +301,8 @@ fn render_graph_line<'a>(
                 // HEAD uses a double circle, others use a filled circle
                 let ch = if node.is_head { '◉' } else { '●' };
                 // Main branch (blue) stays blue; other HEADs are green
-                let color = if *color_idx == crate::graph::colors::MAIN_BRANCH_COLOR {
-                    get_color_by_index(*color_idx)
-                } else if node.is_head {
+                let is_main = *color_idx == crate::graph::colors::MAIN_BRANCH_COLOR;
+                let color = if node.is_head && !is_main {
                     Color::Green
                 } else {
                     get_color_by_index(*color_idx)
@@ -261,11 +386,37 @@ fn render_graph_line<'a>(
     let hash = truncate_to_width(&commit.short_id, 7);
     let hash_formatted = format!("{:<7}", hash); // fixed 7 chars
 
-    // Fixed width for right-aligned part: " YYYY-MM-DD  author    hash   "
-    // Space1 + date10 + space2 + author8 + space2 + hash7 + space1 = 31
-    const RIGHT_FIXED_WIDTH: usize = 31;
+    // Widths for each display level (right-aligned block)
+    // Display order: date, author, hash
+    // Priority: author > date > hash (hash disappears first, then date, then author)
+    const WIDTH_DATE_AUTHOR_HASH: usize = 31; // " YYYY-MM-DD  author    hash   "
+    const WIDTH_DATE_AUTHOR: usize = 22; // " YYYY-MM-DD  author   "
+    const WIDTH_AUTHOR_ONLY: usize = 11; // "  author   "
 
-    // Render branch labels (bold, bracketed, graph color)
+    // Calculate branch width first (before rendering)
+    let branch_width: usize = branch_display
+        .iter()
+        .enumerate()
+        .map(|(i, (label, _))| display_width(label) + if i > 0 { 1 } else { 0 })
+        .sum::<usize>()
+        + if !branch_display.is_empty() { 1 } else { 0 };
+
+    // Calculate remaining space for branch + message + right info
+    let graph_width = left_width;
+    let remaining_for_content = total_width.saturating_sub(graph_width);
+
+    // Ensure minimum space for branch + commit message before showing right-side info
+    // This keeps right-side alignment consistent across all rows
+    const CONTENT_MIN_WIDTH: usize = 50;
+    let available_for_right = remaining_for_content.saturating_sub(CONTENT_MIN_WIDTH);
+    let (show_date, show_author, show_hash, right_width) = match available_for_right {
+        w if w >= WIDTH_DATE_AUTHOR_HASH => (true, true, true, WIDTH_DATE_AUTHOR_HASH),
+        w if w >= WIDTH_DATE_AUTHOR => (true, true, false, WIDTH_DATE_AUTHOR),
+        w if w >= WIDTH_AUTHOR_ONLY => (false, true, false, WIDTH_AUTHOR_ONLY),
+        _ => (false, false, false, 0),
+    };
+
+    // Render branch labels
     for (i, (label, style)) in branch_display.iter().enumerate() {
         if i > 0 {
             spans.push(Span::raw(" "));
@@ -279,10 +430,10 @@ fn render_graph_line<'a>(
         left_width += 1;
     }
 
-    // Compute max message width (use remaining space)
-    let available_for_message = total_width
-        .saturating_sub(left_width)
-        .saturating_sub(RIGHT_FIXED_WIDTH);
+    // Compute max message width (remaining space after branch and right side)
+    let available_for_message = remaining_for_content
+        .saturating_sub(branch_width)
+        .saturating_sub(right_width);
     let message = truncate_to_width(&commit.message, available_for_message);
     let message_width = display_width(&message);
     spans.push(Span::styled(message, msg_style));
@@ -291,19 +442,27 @@ fn render_graph_line<'a>(
     // Padding so the right-aligned block starts at a fixed column
     let padding = total_width
         .saturating_sub(left_width)
-        .saturating_sub(RIGHT_FIXED_WIDTH);
+        .saturating_sub(right_width);
     if padding > 0 {
         spans.push(Span::raw(" ".repeat(padding)));
     }
 
-    // === Append right-aligned block (fixed width) ===
-    spans.push(Span::raw(" "));
-    spans.push(Span::styled(date, date_style));
-    spans.push(Span::raw("  "));
-    spans.push(Span::styled(author_formatted, author_style));
-    spans.push(Span::raw("  "));
-    spans.push(Span::styled(hash_formatted, hash_style));
-    spans.push(Span::raw(" "));
+    // === Append right-aligned block (display: date, author, hash) ===
+    if show_date {
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled(date, date_style));
+    }
+    if show_author {
+        spans.push(Span::raw("  "));
+        spans.push(Span::styled(author_formatted, author_style));
+    }
+    if show_hash {
+        spans.push(Span::raw("  "));
+        spans.push(Span::styled(hash_formatted, hash_style));
+    }
+    if show_date || show_author || show_hash {
+        spans.push(Span::raw(" "));
+    }
 
     Line::from(spans)
 }
