@@ -7,7 +7,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, ListState, StatefulWidget},
 };
-use unicode_width::UnicodeWidthStr;
+use unicode_width::UnicodeWidthChar;
 
 use crate::{
     app::App,
@@ -18,14 +18,27 @@ use crate::{
 use super::{render_placeholder_block, MIN_WIDGET_HEIGHT, MIN_WIDGET_WIDTH};
 
 /// Calculate display width of a string
-/// Accounts for emoji variation selectors (U+FE0F) which cause preceding
-/// characters to display as 2-width emoji in terminals
+/// Handles VS16 (U+FE0F) which changes preceding character to emoji presentation (width 2)
 fn display_width(s: &str) -> usize {
-    let base_width = UnicodeWidthStr::width(s);
-    // Count variation selectors - each one adds 1 to width
-    // because the preceding character becomes a 2-width emoji
-    let variation_selectors = s.chars().filter(|&c| c == '\u{FE0F}').count();
-    base_width + variation_selectors
+    let chars: Vec<char> = s.chars().collect();
+    let mut width = 0;
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        let next_is_vs16 = i + 1 < chars.len() && chars[i + 1] == '\u{FE0F}';
+        if next_is_vs16 {
+            // Character followed by VS16 = emoji presentation = width 2
+            width += 2;
+            i += 2;
+        } else if c == '\u{FE0F}' {
+            // Standalone VS16 has no width
+            i += 1;
+        } else {
+            width += UnicodeWidthChar::width(c).unwrap_or(0);
+            i += 1;
+        }
+    }
+    width
 }
 
 pub struct GraphViewWidget<'a> {
@@ -177,22 +190,33 @@ fn optimize_branch_display(
 }
 
 /// Truncate a string to the specified display width
-/// Accounts for emoji variation selectors (U+FE0F)
+/// Handles VS16 (U+FE0F) which changes preceding character to emoji presentation (width 2)
 fn truncate_to_width(s: &str, max_width: usize) -> String {
+    let chars: Vec<char> = s.chars().collect();
     let mut result = String::new();
     let mut current_width = 0;
-    for ch in s.chars() {
-        // Variation selector adds 1 to width (makes preceding char 2-width emoji)
-        let ch_width = if ch == '\u{FE0F}' {
-            1
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        let next_is_vs16 = i + 1 < chars.len() && chars[i + 1] == '\u{FE0F}';
+        let ch_width = if next_is_vs16 {
+            2
+        } else if c == '\u{FE0F}' {
+            0
         } else {
-            unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0)
+            UnicodeWidthChar::width(c).unwrap_or(0)
         };
         if current_width + ch_width > max_width {
             break;
         }
-        result.push(ch);
+        result.push(c);
         current_width += ch_width;
+        if next_is_vs16 {
+            result.push(chars[i + 1]);
+            i += 2;
+        } else {
+            i += 1;
+        }
     }
     result
 }
