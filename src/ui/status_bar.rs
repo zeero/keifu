@@ -137,18 +137,20 @@ impl<'a> Widget for StatusBar<'a> {
         let line = Line::from(spans);
         buf.set_line(area.x, area.y, &line, area.width);
 
-        // Show the mode on the right
+        // Show the mode on the right (only for non-Normal modes)
         let mode_text = match self.mode {
-            AppMode::Normal => " NORMAL ",
-            AppMode::Help => " HELP ",
-            AppMode::Input { .. } => " INPUT ",
-            AppMode::Confirm { .. } => " CONFIRM ",
-            AppMode::Error { .. } => " ERROR ",
+            AppMode::Normal => None,
+            AppMode::Help => Some(" HELP "),
+            AppMode::Input { .. } => Some(" INPUT "),
+            AppMode::Confirm { .. } => Some(" CONFIRM "),
+            AppMode::Error { .. } => Some(" ERROR "),
         };
-        let mode_len = mode_text.len() as u16;
-        if area.width > mode_len {
-            let x = area.x + area.width - mode_len;
-            buf.set_string(x, area.y, mode_text, mode_style);
+        if let Some(text) = mode_text {
+            let mode_len = text.len() as u16;
+            if area.width > mode_len {
+                let x = area.x + area.width - mode_len;
+                buf.set_string(x, area.y, text, mode_style);
+            }
         }
     }
 }

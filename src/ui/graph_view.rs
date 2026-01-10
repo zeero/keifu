@@ -17,24 +17,36 @@ use crate::{
 
 use super::{render_placeholder_block, MIN_WIDGET_HEIGHT, MIN_WIDGET_WIDTH};
 
-/// Calculate display width of a string
-/// Handles VS16 (U+FE0F) which changes preceding character to emoji presentation (width 2)
+/// VS16 (U+FE0F) variation selector for emoji presentation
+const VS16: char = '\u{FE0F}';
+
+/// Calculate character width considering VS16 emoji presentation sequence.
+/// If `next_char` is VS16, the character has emoji presentation width (2).
+/// VS16 itself has no width.
+fn char_width_with_vs16(c: char, next_char: Option<char>) -> usize {
+    if next_char == Some(VS16) {
+        2
+    } else if c == VS16 {
+        0
+    } else {
+        UnicodeWidthChar::width(c).unwrap_or(0)
+    }
+}
+
+/// Calculate display width of a string.
+/// Handles VS16 which changes preceding character to emoji presentation (width 2).
 fn display_width(s: &str) -> usize {
     let chars: Vec<char> = s.chars().collect();
     let mut width = 0;
     let mut i = 0;
     while i < chars.len() {
-        let c = chars[i];
-        let next_is_vs16 = i + 1 < chars.len() && chars[i + 1] == '\u{FE0F}';
-        if next_is_vs16 {
-            // Character followed by VS16 = emoji presentation = width 2
-            width += 2;
+        let next_char = chars.get(i + 1).copied();
+        let ch_width = char_width_with_vs16(chars[i], next_char);
+        width += ch_width;
+        // Skip next char if it was VS16 (already accounted for)
+        if next_char == Some(VS16) {
             i += 2;
-        } else if c == '\u{FE0F}' {
-            // Standalone VS16 has no width
-            i += 1;
         } else {
-            width += UnicodeWidthChar::width(c).unwrap_or(0);
             i += 1;
         }
     }
@@ -189,8 +201,8 @@ fn optimize_branch_display(
     result
 }
 
-/// Truncate a string to the specified display width
-/// Handles VS16 (U+FE0F) which changes preceding character to emoji presentation (width 2)
+/// Truncate a string to the specified display width.
+/// Handles VS16 which changes preceding character to emoji presentation (width 2).
 fn truncate_to_width(s: &str, max_width: usize) -> String {
     let chars: Vec<char> = s.chars().collect();
     let mut result = String::new();
@@ -198,21 +210,15 @@ fn truncate_to_width(s: &str, max_width: usize) -> String {
     let mut i = 0;
     while i < chars.len() {
         let c = chars[i];
-        let next_is_vs16 = i + 1 < chars.len() && chars[i + 1] == '\u{FE0F}';
-        let ch_width = if next_is_vs16 {
-            2
-        } else if c == '\u{FE0F}' {
-            0
-        } else {
-            UnicodeWidthChar::width(c).unwrap_or(0)
-        };
+        let next_char = chars.get(i + 1).copied();
+        let ch_width = char_width_with_vs16(c, next_char);
         if current_width + ch_width > max_width {
             break;
         }
         result.push(c);
         current_width += ch_width;
-        if next_is_vs16 {
-            result.push(chars[i + 1]);
+        if next_char == Some(VS16) {
+            result.push(VS16);
             i += 2;
         } else {
             i += 1;
