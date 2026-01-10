@@ -15,7 +15,7 @@ use crate::app::App;
 
 use self::{
     commit_detail::CommitDetailWidget,
-    dialog::{ConfirmDialog, InputDialog},
+    dialog::{BranchInfoPopup, ConfirmDialog, InputDialog},
     graph_view::GraphViewWidget,
     help_popup::HelpPopup,
     status_bar::StatusBar,
@@ -54,6 +54,42 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     );
     frame.render_widget(CommitDetailWidget::new(app), detail_area);
     frame.render_widget(StatusBar::new(app), status_area);
+
+    // Branch info popup (when multiple branches exist on selected node)
+    let selected_branches = app.selected_node_branches();
+    if selected_branches.len() > 1 && matches!(app.mode, crate::app::AppMode::Normal) {
+        let popup_height = (selected_branches.len() + 2).min(10) as u16;
+        let max_branch_len = selected_branches
+            .iter()
+            .map(|b| b.len())
+            .max()
+            .unwrap_or(10);
+        let popup_width = (max_branch_len + 6).min(50) as u16;
+
+        // Calculate selected row's screen position (add 1 for border)
+        let selected_idx = app.graph_list_state.selected().unwrap_or(0);
+        let offset = app.graph_list_state.offset();
+        let selected_screen_y = graph_area.y + 1 + selected_idx.saturating_sub(offset) as u16;
+
+        // Position popup at right side of graph area
+        // Default: top position; shift down only if it overlaps with selected row
+        let popup_x = graph_area.x + graph_area.width.saturating_sub(popup_width + 2);
+        let default_popup_y = graph_area.y + 1;
+        let popup_y = if selected_screen_y >= default_popup_y
+            && selected_screen_y < default_popup_y + popup_height
+        {
+            // Overlap detected: position popup just below the selected row
+            (selected_screen_y + 1).min(graph_area.y + graph_area.height - popup_height)
+        } else {
+            default_popup_y
+        };
+        let popup_area = Rect::new(popup_x, popup_y, popup_width, popup_height);
+
+        frame.render_widget(
+            BranchInfoPopup::new(&selected_branches, app.selected_branch_name()),
+            popup_area,
+        );
+    }
 
     // Popups
     match &app.mode {
