@@ -21,6 +21,30 @@ use crate::{
     },
 };
 
+/// Filter branch names to exclude remote branches that have matching local branches
+/// Returns branches in order: local branches first, then remote-only branches
+fn filter_remote_duplicates(branch_names: &[String]) -> Vec<&str> {
+    use std::collections::HashSet;
+
+    let local_branches: HashSet<&str> = branch_names
+        .iter()
+        .filter(|n| !n.starts_with("origin/"))
+        .map(|s| s.as_str())
+        .collect();
+
+    branch_names
+        .iter()
+        .filter(|name| {
+            if let Some(local_name) = name.strip_prefix("origin/") {
+                !local_branches.contains(local_name)
+            } else {
+                true
+            }
+        })
+        .map(|s| s.as_str())
+        .collect()
+}
+
 /// Application modes
 #[derive(Debug, Clone)]
 pub enum AppMode {
@@ -217,26 +241,21 @@ impl App {
 
     /// Check if async fetch has completed and process the result
     pub fn update_fetch_status(&mut self) {
-        let result = match &self.fetch_receiver {
-            Some(rx) => rx.try_recv().ok(),
-            None => None,
+        let Some(rx) = &self.fetch_receiver else {
+            return;
+        };
+        let Some(fetch_result) = rx.try_recv().ok() else {
+            return;
         };
 
-        if let Some(fetch_result) = result {
-            self.fetch_receiver = None;
+        self.fetch_receiver = None;
 
-            match fetch_result {
-                Ok(()) => {
-                    if let Err(e) = self.refresh() {
-                        self.show_error(format!("Refresh failed: {}", e));
-                    } else {
-                        self.set_message("Fetched from origin");
-                    }
-                }
-                Err(e) => {
-                    self.show_error(e);
-                }
-            }
+        match fetch_result {
+            Ok(()) => match self.refresh() {
+                Ok(()) => self.set_message("Fetched from origin"),
+                Err(e) => self.show_error(format!("Refresh failed: {}", e)),
+            },
+            Err(e) => self.show_error(e),
         }
     }
 
@@ -260,15 +279,13 @@ impl App {
             return self.message.as_deref();
         }
 
-        match (&self.message, &self.message_time) {
-            (Some(msg), Some(time)) => {
-                if time.elapsed().as_secs() < MESSAGE_TIMEOUT_SECS {
-                    Some(msg.as_str())
-                } else {
-                    None
-                }
-            }
-            _ => None,
+        let msg = self.message.as_deref()?;
+        let time = self.message_time.as_ref()?;
+
+        if time.elapsed().as_secs() < MESSAGE_TIMEOUT_SECS {
+            Some(msg)
+        } else {
+            None
         }
     }
 
@@ -361,32 +378,29 @@ impl App {
 
     /// Get cached diff info for the currently selected node
     pub fn cached_diff(&self) -> Option<&CommitDiffInfo> {
-        let selected_node = self.graph_list_state.selected().and_then(|idx| {
-            self.graph_layout.nodes.get(idx)
-        });
+        let node = self
+            .graph_list_state
+            .selected()
+            .and_then(|idx| self.graph_layout.nodes.get(idx))?;
 
-        if let Some(node) = selected_node {
-            if node.is_uncommitted {
-                return self.uncommitted_diff_cache.as_ref();
-            }
+        if node.is_uncommitted {
+            self.uncommitted_diff_cache.as_ref()
+        } else {
+            self.diff_cache.as_ref()
         }
-
-        self.diff_cache.as_ref()
     }
 
     /// Whether diff is currently loading for the selected node
     pub fn is_diff_loading(&self) -> bool {
-        let selected_node = self.graph_list_state.selected().and_then(|idx| {
-            self.graph_layout.nodes.get(idx)
-        });
+        let node = self
+            .graph_list_state
+            .selected()
+            .and_then(|idx| self.graph_layout.nodes.get(idx));
 
-        if let Some(node) = selected_node {
-            if node.is_uncommitted {
-                return self.uncommitted_diff_loading;
-            }
+        match node {
+            Some(n) if n.is_uncommitted => self.uncommitted_diff_loading,
+            _ => self.diff_loading_oid.is_some(),
         }
-
-        self.diff_loading_oid.is_some()
     }
 
     /// Handle an action
@@ -523,50 +537,47 @@ impl App {
     }
 
     fn handle_input_action(&mut self, action: Action) -> Result<()> {
-        let (title, input, input_action) = match &self.mode {
-            AppMode::Input {
-                title,
-                input,
-                action,
-            } => (title.clone(), input.clone(), action.clone()),
-            _ => return Ok(()),
+        let AppMode::Input {
+            title,
+            input,
+            action: input_action,
+        } = &self.mode
+        else {
+            return Ok(());
         };
+        let (title, mut input, input_action) = (title.clone(), input.clone(), input_action.clone());
 
         match action {
             Action::Confirm => {
-                match input_action {
-                    InputAction::CreateBranch => {
-                        if !input.is_empty() {
-                            if let Some(node) = self.selected_commit_node() {
-                                if let Some(commit) = &node.commit {
-                                    create_branch(&self.repo.repo, &input, commit.oid)?;
-                                    self.refresh()?;
-                                }
+                if let InputAction::CreateBranch = input_action {
+                    if !input.is_empty() {
+                        if let Some(node) = self.selected_commit_node() {
+                            if let Some(commit) = &node.commit {
+                                create_branch(&self.repo.repo, &input, commit.oid)?;
+                                self.refresh()?;
                             }
                         }
                     }
-                    InputAction::Search => {
-                        // TODO: Search feature
-                    }
                 }
+                // InputAction::Search is a TODO - no action needed
                 self.mode = AppMode::Normal;
             }
             Action::Cancel => {
                 self.mode = AppMode::Normal;
             }
             Action::InputChar(c) => {
+                input.push(c);
                 self.mode = AppMode::Input {
                     title,
-                    input: format!("{}{}", input, c),
+                    input,
                     action: input_action,
                 };
             }
             Action::InputBackspace => {
-                let mut new_input = input;
-                new_input.pop();
+                input.pop();
                 self.mode = AppMode::Input {
                     title,
-                    input: new_input,
+                    input,
                     action: input_action,
                 };
             }
@@ -576,10 +587,14 @@ impl App {
     }
 
     fn handle_confirm_action(&mut self, action: Action) -> Result<()> {
-        let confirm_action = match &self.mode {
-            AppMode::Confirm { action, .. } => action.clone(),
-            _ => return Ok(()),
+        let AppMode::Confirm {
+            action: confirm_action,
+            ..
+        } = &self.mode
+        else {
+            return Ok(());
         };
+        let confirm_action = confirm_action.clone();
 
         match action {
             Action::Confirm => {
@@ -678,48 +693,38 @@ impl App {
         }
     }
 
-    /// Move to the left branch within the same commit
-    fn move_branch_left(&mut self) {
+    /// Move to an adjacent branch within the same commit
+    fn move_branch_within_node(&mut self, delta: isize) {
         let Some(pos) = self.selected_branch_position else {
             return;
         };
-        if pos == 0 {
+
+        let new_pos = (pos as isize + delta) as usize;
+        if new_pos >= self.branch_positions.len() {
             return;
         }
 
         let Some((current_node, _)) = self.branch_positions.get(pos) else {
             return;
         };
-        let Some((prev_node, _)) = self.branch_positions.get(pos - 1) else {
+        let Some((target_node, _)) = self.branch_positions.get(new_pos) else {
             return;
         };
 
         // Only move within the same commit
-        if current_node == prev_node {
-            self.selected_branch_position = Some(pos - 1);
+        if current_node == target_node {
+            self.selected_branch_position = Some(new_pos);
         }
+    }
+
+    /// Move to the left branch within the same commit
+    fn move_branch_left(&mut self) {
+        self.move_branch_within_node(-1);
     }
 
     /// Move to the right branch within the same commit
     fn move_branch_right(&mut self) {
-        let Some(pos) = self.selected_branch_position else {
-            return;
-        };
-        if pos + 1 >= self.branch_positions.len() {
-            return;
-        }
-
-        let Some((current_node, _)) = self.branch_positions.get(pos) else {
-            return;
-        };
-        let Some((next_node, _)) = self.branch_positions.get(pos + 1) else {
-            return;
-        };
-
-        // Only move within the same commit
-        if current_node == next_node {
-            self.selected_branch_position = Some(pos + 1);
-        }
+        self.move_branch_within_node(1);
     }
 
     /// Get the currently selected branch
@@ -735,6 +740,18 @@ impl App {
         self.selected_branch_position
             .and_then(|pos| self.branch_positions.get(pos))
             .map(|(_, name)| name.as_str())
+    }
+
+    /// Returns all branch names for the currently selected node
+    pub fn selected_node_branches(&self) -> Vec<&str> {
+        let Some(node_idx) = self.graph_list_state.selected() else {
+            return vec![];
+        };
+        self.branch_positions
+            .iter()
+            .filter(|(idx, _)| *idx == node_idx)
+            .map(|(_, name)| name.as_str())
+            .collect()
     }
 
     fn selected_commit_node(&self) -> Option<&crate::git::graph::GraphNode> {
@@ -764,34 +781,16 @@ impl App {
 
     /// Build a flat list of (node_index, branch_name) for all branches
     /// Excludes remote branches that have a matching local branch (e.g., origin/main when main exists)
+    /// Order matches optimize_branch_display: local branches first, then remote-only branches
     fn build_branch_positions(graph_layout: &GraphLayout) -> Vec<(usize, String)> {
-        use std::collections::HashSet;
-
         graph_layout
             .nodes
             .iter()
             .enumerate()
             .flat_map(|(node_idx, node)| {
-                // Collect local branch names in this node
-                let local_branches: HashSet<&str> = node
-                    .branch_names
-                    .iter()
-                    .filter(|n| !n.starts_with("origin/"))
-                    .map(|s| s.as_str())
-                    .collect();
-
-                // Filter out remote branches that have a matching local branch
-                node.branch_names
-                    .iter()
-                    .filter(move |name| {
-                        if let Some(local_name) = name.strip_prefix("origin/") {
-                            // Exclude if there's a matching local branch
-                            !local_branches.contains(local_name)
-                        } else {
-                            true // Keep all local branches
-                        }
-                    })
-                    .map(move |name| (node_idx, name.clone()))
+                filter_remote_duplicates(&node.branch_names)
+                    .into_iter()
+                    .map(move |name| (node_idx, name.to_string()))
             })
             .collect()
     }
