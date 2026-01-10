@@ -16,13 +16,10 @@ pub fn poll_event() -> Result<Option<Event>> {
 
 /// Extract key event
 pub fn get_key_event(event: &Event) -> Option<KeyEvent> {
-    match event {
-        Event::Key(key) => Some(*key),
-        _ => None,
+    if let Event::Key(key) = event {
+        Some(*key)
+    } else {
+        None
     }
 }
 
-/// Check whether the event is a resize
-pub fn is_resize_event(event: &Event) -> bool {
-    matches!(event, Event::Resize(_, _))
-}

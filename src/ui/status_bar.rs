@@ -73,25 +73,22 @@ impl<'a> Widget for StatusBar<'a> {
 
         // Key hints (vary by mode)
         match self.mode {
-            AppMode::Normal => {
-                // Show message if present (e.g., "Fetching from origin...")
-                if let Some(msg) = self.message {
-                    let msg_style = if self.is_fetching {
-                        // Yellow for in-progress operations
-                        Style::default()
-                            .fg(Color::Black)
-                            .bg(Color::Yellow)
-                            .add_modifier(Modifier::BOLD)
+            AppMode::Normal => match self.message {
+                Some(msg) => {
+                    // Yellow for in-progress, Cyan for success
+                    let bg = if self.is_fetching {
+                        Color::Yellow
                     } else {
-                        // Cyan for success messages (distinct from green branch label)
-                        Style::default()
-                            .fg(Color::Black)
-                            .bg(Color::Cyan)
-                            .add_modifier(Modifier::BOLD)
+                        Color::Cyan
                     };
+                    let msg_style = Style::default()
+                        .fg(Color::Black)
+                        .bg(bg)
+                        .add_modifier(Modifier::BOLD);
                     spans.push(Span::styled(format!(" {} ", msg), msg_style));
                     spans.push(Span::raw("  "));
-                } else {
+                }
+                None => {
                     spans.push(Span::styled(" j/k ", key_style));
                     spans.push(Span::styled("move ", desc_style));
                     spans.push(Span::styled(" Enter ", key_style));
@@ -105,7 +102,7 @@ impl<'a> Widget for StatusBar<'a> {
                     spans.push(Span::styled(" q ", key_style));
                     spans.push(Span::styled("quit", desc_style));
                 }
-            }
+            },
             AppMode::Help => {
                 spans.push(Span::styled(" Esc/q ", key_style));
                 spans.push(Span::styled("close help", desc_style));

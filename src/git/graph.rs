@@ -462,11 +462,7 @@ pub fn build_graph(
                             .unwrap_or(true)
                     });
                     if available {
-                        let distance = if candidate_lane > head_lane {
-                            candidate_lane - head_lane
-                        } else {
-                            head_lane - candidate_lane
-                        };
+                        let distance = candidate_lane.abs_diff(head_lane);
                         if distance < best_distance {
                             best_distance = distance;
                             best_lane = candidate_lane;
@@ -490,10 +486,10 @@ pub fn build_graph(
             }
 
             // Add Pipe to all nodes before HEAD commit
-            for i in 0..head_idx {
-                let cell_idx = uncommitted_lane * 2;
-                if nodes[i].cells[cell_idx] == CellType::Empty {
-                    nodes[i].cells[cell_idx] = CellType::Pipe(UNCOMMITTED_COLOR_INDEX);
+            let cell_idx = uncommitted_lane * 2;
+            for node in nodes.iter_mut().take(head_idx) {
+                if node.cells[cell_idx] == CellType::Empty {
+                    node.cells[cell_idx] = CellType::Pipe(UNCOMMITTED_COLOR_INDEX);
                 }
             }
 
