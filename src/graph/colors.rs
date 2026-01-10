@@ -29,11 +29,6 @@ pub fn get_color_by_index(color_index: usize) -> Color {
     LANE_COLORS[color_index % LANE_COLORS.len()]
 }
 
-/// Get a color from a lane number (kept for backward compatibility)
-pub fn get_lane_color(lane: usize) -> Color {
-    get_color_by_index(lane)
-}
-
 /// Main branch color (light blue)
 pub const MAIN_BRANCH_COLOR: usize = 9; // Color::LightBlue
 

@@ -68,10 +68,10 @@ impl CommitDiffInfo {
 
         // Merge unstaged files into result
         for file in unstaged_result.files {
-            if !result.files.iter().any(|f| f.path == file.path) {
-                if result.files.len() < MAX_FILES_TO_DISPLAY {
-                    result.files.push(file);
-                }
+            if !result.files.iter().any(|f| f.path == file.path)
+                && result.files.len() < MAX_FILES_TO_DISPLAY
+            {
+                result.files.push(file);
             }
         }
 
