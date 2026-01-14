@@ -49,14 +49,11 @@ impl<'a> SearchDropdown<'a> {
             result.matched_indices.iter().copied().collect();
 
         let mut spans = Vec::new();
-        let chars: Vec<char> = name.chars().collect();
         let mut current_segment = String::new();
         let mut current_is_matched = false;
-        let mut char_count = 0;
 
-        for (char_idx, ch) in chars.iter().enumerate() {
-            // Check if we've exceeded max width (approximate)
-            if char_count >= max_width.saturating_sub(3) {
+        for (char_idx, ch) in name.chars().enumerate() {
+            if char_idx >= max_width.saturating_sub(3) {
                 current_segment.push_str("...");
                 break;
             }
@@ -64,34 +61,30 @@ impl<'a> SearchDropdown<'a> {
             let is_matched = matched_set.contains(&char_idx);
 
             if is_matched != current_is_matched && !current_segment.is_empty() {
-                let style = if current_is_matched {
-                    Style::default()
-                        .fg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default().fg(Color::White)
-                };
-                spans.push(Span::styled(std::mem::take(&mut current_segment), style));
+                spans.push(Span::styled(
+                    std::mem::take(&mut current_segment),
+                    highlight_style(current_is_matched),
+                ));
             }
 
-            current_segment.push(*ch);
+            current_segment.push(ch);
             current_is_matched = is_matched;
-            char_count += 1;
         }
 
-        // Push remaining segment
         if !current_segment.is_empty() {
-            let style = if current_is_matched {
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(Color::White)
-            };
-            spans.push(Span::styled(current_segment, style));
+            spans.push(Span::styled(current_segment, highlight_style(current_is_matched)));
         }
 
         spans
+    }
+}
+
+/// Get style for highlighted/non-highlighted text
+fn highlight_style(is_matched: bool) -> Style {
+    if is_matched {
+        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(Color::White)
     }
 }
 
@@ -216,42 +209,36 @@ impl<'a> Widget for SearchDropdown<'a> {
             }
         }
 
-        // Show hint at bottom if there's space (adaptive to width)
+        // Show hint at bottom if there's space
         if y < inner.y + inner.height {
-            y = inner.y + inner.height - 1;
-            let width = inner.width as usize;
-            let hint = if has_results {
-                if width >= 40 {
-                    "  ↑↓: select  Enter: jump  Esc: cancel"
-                } else if width >= 28 {
-                    "  ↑↓/Tab  Enter  Esc"
-                } else if width >= 16 {
-                    "  ↑↓ Enter Esc"
-                } else {
-                    ""
-                }
-            } else if self.input.is_empty() {
-                if width >= 28 {
-                    "  Enter: confirm  Esc: cancel"
-                } else if width >= 16 {
-                    "  Enter  Esc"
-                } else {
-                    ""
-                }
-            } else if width >= 12 {
-                "  No matches"
-            } else {
-                ""
-            };
+            let hint = select_hint_text(inner.width as usize, has_results, self.input.is_empty());
             if !hint.is_empty() {
-                buf.set_string(
-                    inner.x,
-                    y,
-                    hint,
-                    Style::default().fg(Color::DarkGray),
-                );
+                let hint_y = inner.y + inner.height - 1;
+                buf.set_string(inner.x, hint_y, hint, Style::default().fg(Color::DarkGray));
             }
         }
+    }
+}
+
+/// Select appropriate hint text based on width and state
+fn select_hint_text(width: usize, has_results: bool, input_empty: bool) -> &'static str {
+    if has_results {
+        match width {
+            40.. => "  ↑↓: select  Enter: jump  Esc: cancel",
+            28..=39 => "  ↑↓/Tab  Enter  Esc",
+            16..=27 => "  ↑↓ Enter Esc",
+            _ => "",
+        }
+    } else if input_empty {
+        match width {
+            28.. => "  Enter: confirm  Esc: cancel",
+            16..=27 => "  Enter  Esc",
+            _ => "",
+        }
+    } else if width >= 12 {
+        "  No matches"
+    } else {
+        ""
     }
 }
 

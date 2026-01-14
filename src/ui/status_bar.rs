@@ -28,16 +28,12 @@ impl<'a> StatusBar<'a> {
         };
 
         // Generate search status message
-        let is_searching = matches!(app.mode, AppMode::Input { action: InputAction::Search, .. });
-        let search_info = if is_searching {
-            let count = app.search_match_count();
-            if count > 0 {
-                Some(format!("{} matches", count))
-            } else {
-                Some("No matches".to_string())
+        let search_info = match &app.mode {
+            AppMode::Input { action: InputAction::Search, .. } => {
+                let count = app.search_match_count();
+                Some(if count > 0 { format!("{} matches", count) } else { "No matches".to_string() })
             }
-        } else {
-            None
+            _ => None,
         };
 
         Self {

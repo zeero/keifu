@@ -116,10 +116,10 @@ impl SearchState {
         if self.fuzzy_matches.is_empty() {
             return;
         }
+        let last_idx = self.fuzzy_matches.len() - 1;
         self.dropdown_selection = Some(match self.dropdown_selection {
-            Some(idx) if idx + 1 < self.fuzzy_matches.len() => idx + 1,
-            Some(_) => 0,
-            None => 0,
+            Some(idx) if idx < last_idx => idx + 1,
+            _ => 0,
         });
     }
 

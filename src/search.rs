@@ -40,16 +40,8 @@ pub fn fuzzy_search_branches(
         })
         .collect();
 
-    // Sort by score descending, then by graph position ascending (newer branches first)
-    results.sort_by(|a, b| {
-        match b.score.cmp(&a.score) {
-            std::cmp::Ordering::Equal => {
-                // Tie-break by branch_idx (lower = higher in graph = newer)
-                a.branch_idx.cmp(&b.branch_idx)
-            }
-            other => other,
-        }
-    });
+    // Sort by score descending, then by branch_idx ascending (newer branches first)
+    results.sort_by(|a, b| b.score.cmp(&a.score).then_with(|| a.branch_idx.cmp(&b.branch_idx)));
 
     results
 }
