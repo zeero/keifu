@@ -100,7 +100,7 @@ impl Widget for HelpPopup {
             Line::from(Span::styled("Search", header_style)),
             Line::from(vec![
                 Span::styled("  /          ", key_style),
-                Span::styled("Search branches (fuzzy)", desc_style),
+                Span::styled("Search branches", desc_style),
             ]),
             Line::from(vec![
                 Span::styled("  ↑ / C-k    ", key_style),

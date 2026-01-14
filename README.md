@@ -9,14 +9,16 @@ keifu (系譜, /keːɸɯ/) is a terminal UI tool that visualizes Git commit grap
 ## Features
 
 - Unicode commit graph with per-branch colors
-- Commit list with branch labels, date, author, short hash, and message
+- Commit list with branch labels, date, author, short hash, and message (some fields may be hidden on narrow terminals)
 - Commit detail panel with full message and changed file stats (+/-)
 - Git operations: checkout, create/delete branch, fetch
+- Branch search with dropdown UI
 
 ## Requirements
 
 - Run inside a Git repository (auto-discovery from current directory)
 - A terminal with Unicode line drawing support and color
+- `git` command in PATH (required for fetch)
 - Rust toolchain (for building from source)
 
 ## Installation
@@ -58,10 +60,13 @@ keifu
 | `k` / `↑` | Move up |
 | `]` / `Tab` | Jump to next commit that has branch labels |
 | `[` / `Shift+Tab` | Jump to previous commit that has branch labels |
+| `h` / `←` | Select left branch (same commit) |
+| `l` / `→` | Select right branch (same commit) |
 | `Ctrl+d` | Page down |
 | `Ctrl+u` | Page up |
 | `g` / `Home` | Go to top |
 | `G` / `End` | Go to bottom |
+| `@` | Jump to HEAD (current branch) |
 
 ### Git operations
 
@@ -71,6 +76,16 @@ keifu
 | `b` | Create branch at selected commit |
 | `d` | Delete branch (local, non-HEAD) |
 | `f` | Fetch from origin |
+
+### Search
+
+| Key | Action |
+| --- | --- |
+| `/` | Search branches (incremental fuzzy search) |
+| `↑` / `Ctrl+k` | Select previous result |
+| `↓` / `Ctrl+j` | Select next result |
+| `Enter` | Jump to selected branch |
+| `Esc` / `Backspace` on empty | Cancel search |
 
 ### Other
 
@@ -85,8 +100,11 @@ keifu
 - The TUI loads up to 500 commits across all branches.
 - Merge commits are diffed against the first parent; the initial commit is diffed against an empty tree.
 - Changed files are capped at 50 and binary files are skipped.
-- Checking out `origin/xxx` creates or updates a local branch and sets its upstream. If the local branch exists but points to a different commit, it is force-updated to match the remote.
+- If there are staged or unstaged changes (excluding untracked files), an "uncommitted changes" row appears at the top.
+- When multiple branches point to the same commit, the label is collapsed to a single name with a `+N` suffix (e.g., `main +2`). Use `h`/`l` or `←`/`→` to switch between them.
+- Checking out `origin/xxx` creates or updates a local branch. Upstream is set only when creating a new branch. If the local branch exists but points to a different commit, it is force-updated to match the remote.
 - Remote branches are displayed, but delete operations only work with local branches.
+- Fetch requires the `origin` remote to be configured.
 
 ## License
 
