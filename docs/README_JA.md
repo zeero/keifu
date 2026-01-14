@@ -1,10 +1,21 @@
 # 🧬 keifu
 
+[![Crate Status](https://img.shields.io/crates/v/keifu.svg)](https://crates.io/crates/keifu)
+[![Built With Ratatui](https://img.shields.io/badge/Built_With-Ratatui-000?logo=ratatui&logoColor=fff&labelColor=000&color=fff)](https://ratatui.rs)
+
 [English README](../README.md)
 
 keifu (系譜, /keːɸɯ/) は、ターミナル上で Git のコミットグラフを可視化する TUI ツールです。カラー付きのグラフ、コミット詳細、変更ファイルの要約を表示し、基本的なブランチ操作も行えます。
 
 ![スクリーンショット](win_terminal.png)
+
+## 開発動機
+
+- **読みやすいコミットグラフ** — `git log --graph` は読みづらいので、色分けされた見やすいグラフで表示したい
+- **素早いブランチ切り替え** — AI コーディングの普及で、並列にブランチを切って作業することが増えた。ブランチ操作を視覚的かつ高速に
+- **シンプルに保つ** — 基本的な Git 操作のみをサポートし、多機能な Git クライアントにはしない
+- **狭い画面でも快適** — ターミナル分割や小さいウィンドウでも適切に表示
+- **Sixel 対応** — Windows Terminal など Sixel 対応ターミナルでも動作
 
 ## 特長
 

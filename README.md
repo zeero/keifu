@@ -1,10 +1,21 @@
 # 🧬 keifu
 
+[![Crate Status](https://img.shields.io/crates/v/keifu.svg)](https://crates.io/crates/keifu)
+[![Built With Ratatui](https://img.shields.io/badge/Built_With-Ratatui-000?logo=ratatui&logoColor=fff&labelColor=000&color=fff)](https://ratatui.rs)
+
 [日本語版はこちら](docs/README_JA.md)
 
 keifu (系譜, /keːɸɯ/) is a terminal UI tool that visualizes Git commit graphs. It shows a colored commit graph, commit details, and a summary of changed files, and lets you perform basic branch operations.
 
 ![Screenshot](docs/win_terminal.png)
+
+## Motivation
+
+- **Readable commit graph** — `git log --graph` is hard to read; keifu renders a cleaner, color-coded graph
+- **Fast branch switching** — With AI-assisted coding, working on multiple branches in parallel has become common. keifu makes branch switching quick and visual
+- **Keep it simple** — Only basic Git operations are supported; this is not a full-featured Git client
+- **Narrow terminal friendly** — Works well in split panes and small windows
+- **Sixel support** — Compatible with Windows Terminal and other Sixel-capable terminals
 
 ## Features
 
