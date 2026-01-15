@@ -40,17 +40,16 @@ keifu (系譜, /keːɸɯ/) は、ターミナル上で Git のコミットグラ
 cargo install keifu
 ```
 
+### mise を使う
+
+```bash
+mise use -g github:trasta298/keifu@latest
+```
+
 ### ソースから
 
 ```bash
-cargo install --path .
-```
-
-または:
-
-```bash
-cargo build --release
-./target/release/keifu
+git clone https://github.com/trasta298/keifu && cd keifu && cargo install --path .
 ```
 
 ## 使い方
