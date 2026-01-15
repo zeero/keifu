@@ -10,8 +10,8 @@ use ratatui::widgets::ListState;
 use git2::Oid;
 
 use crate::{
-    config::Config,
     action::Action,
+    config::Config,
     git::{
         build_graph,
         graph::GraphLayout,
@@ -505,7 +505,8 @@ impl App {
 
         // Auto-refresh
         if refresh_config.auto_refresh
-            && now.duration_since(self.last_refresh_time).as_secs() >= refresh_config.refresh_interval
+            && now.duration_since(self.last_refresh_time).as_secs()
+                >= refresh_config.refresh_interval
         {
             let _ = self.refresh(false);
             self.last_refresh_time = now;
@@ -611,11 +612,7 @@ impl App {
             let repo_path = self.repo_path.clone();
 
             // Save current working tree status as cache key before starting computation
-            self.uncommitted_cache_key = self
-                .repo
-                .get_working_tree_status()
-                .ok()
-                .flatten();
+            self.uncommitted_cache_key = self.repo.get_working_tree_status().ok().flatten();
 
             self.uncommitted_diff_loading = true;
             self.uncommitted_diff_receiver = Some(rx);
