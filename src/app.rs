@@ -192,6 +192,8 @@ pub struct App {
 
     // Async fetch
     fetch_receiver: Option<Receiver<Result<(), String>>>,
+    /// Whether to suppress error dialogs for fetch failures (for auto-fetch)
+    fetch_silent: bool,
 
     // Auto-refresh state
     config: Config,
@@ -222,9 +224,17 @@ impl App {
         let mut graph_list_state = ListState::default();
         graph_list_state.select(Some(0));
 
-        // Build branch positions and select the first branch if exists
+        // Build branch positions
         let branch_positions = Self::build_branch_positions(&graph_layout);
-        let selected_branch_position = if branch_positions.is_empty() {
+
+        // Determine initial branch selection
+        // If uncommitted node exists (at index 0), don't select any branch
+        // Otherwise, select the first branch if exists
+        let has_uncommitted_node = graph_layout
+            .nodes
+            .first()
+            .is_some_and(|node| node.is_uncommitted);
+        let selected_branch_position = if has_uncommitted_node || branch_positions.is_empty() {
             None
         } else {
             Some(0)
@@ -254,6 +264,7 @@ impl App {
             message: None,
             message_time: None,
             fetch_receiver: None,
+            fetch_silent: false,
             config,
             last_refresh_time: now,
             last_fetch_time: now,
@@ -281,7 +292,13 @@ impl App {
     /// If `force` is true, always clears diff cache (for manual refresh)
     /// If `force` is false, keeps cache when the same content is selected (for auto-refresh)
     pub fn refresh(&mut self, force: bool) -> Result<()> {
-        // Save the currently selected branch name for restoration
+        // Save the current selection state for restoration
+        let was_uncommitted_selected = self
+            .graph_list_state
+            .selected()
+            .and_then(|idx| self.graph_layout.nodes.get(idx))
+            .is_some_and(|node| node.is_uncommitted);
+
         let prev_branch_name = self
             .selected_branch_position
             .and_then(|pos| self.branch_positions.get(pos))
@@ -305,14 +322,28 @@ impl App {
         // Rebuild branch positions
         self.branch_positions = Self::build_branch_positions(&self.graph_layout);
 
-        // Restore branch selection if the branch still exists
-        self.selected_branch_position = prev_branch_name
-            .and_then(|name| self.branch_positions.iter().position(|(_, n)| n == &name));
+        // Restore selection state
+        // Check if uncommitted node still exists in the new graph
+        let has_uncommitted_node = self
+            .graph_layout
+            .nodes
+            .first()
+            .is_some_and(|node| node.is_uncommitted);
 
-        // Sync node selection with branch selection
-        if let Some(pos) = self.selected_branch_position {
-            if let Some((node_idx, _)) = self.branch_positions.get(pos) {
-                self.graph_list_state.select(Some(*node_idx));
+        if was_uncommitted_selected && has_uncommitted_node {
+            // Restore uncommitted node selection
+            self.graph_list_state.select(Some(0));
+            self.selected_branch_position = None;
+        } else {
+            // Restore branch selection if the branch still exists
+            self.selected_branch_position = prev_branch_name
+                .and_then(|name| self.branch_positions.iter().position(|(_, n)| n == &name));
+
+            // Sync node selection with branch selection
+            if let Some(pos) = self.selected_branch_position {
+                if let Some((node_idx, _)) = self.branch_positions.get(pos) {
+                    self.graph_list_state.select(Some(*node_idx));
+                }
             }
         }
 
@@ -321,13 +352,12 @@ impl App {
             self.clear_all_diff_caches();
         } else {
             // Auto-refresh: smart cache - only clear if selection changed
-            let selected_node = self
+            let selected_oid = self
                 .graph_list_state
                 .selected()
-                .and_then(|idx| self.graph_layout.nodes.get(idx));
-
-            let selected_oid = selected_node.and_then(|n| n.commit.as_ref()).map(|c| c.oid);
-            let is_uncommitted = selected_node.is_some_and(|n| n.is_uncommitted);
+                .and_then(|idx| self.graph_layout.nodes.get(idx))
+                .and_then(|n| n.commit.as_ref())
+                .map(|c| c.oid);
 
             // Keep commit diff cache if the same commit is still selected
             if self.diff_cache_oid != selected_oid {
@@ -338,9 +368,10 @@ impl App {
             }
 
             // Keep uncommitted diff cache only if:
-            // 1. Uncommitted node is still selected
+            // 1. Uncommitted node is still selected (was_uncommitted_selected && has_uncommitted_node)
             // 2. The working tree status hasn't changed (same files and mtimes)
-            if !is_uncommitted || self.uncommitted_cache_key != working_tree_status {
+            let uncommitted_still_selected = was_uncommitted_selected && has_uncommitted_node;
+            if !uncommitted_still_selected || self.uncommitted_cache_key != working_tree_status {
                 self.clear_uncommitted_diff_cache();
             }
         }
@@ -429,21 +460,24 @@ impl App {
         let Some(rx) = &self.fetch_receiver else {
             return;
         };
-        let Some(fetch_result) = rx.try_recv().ok() else {
+        let Ok(fetch_result) = rx.try_recv() else {
             return;
         };
 
+        let silent = self.fetch_silent;
         self.fetch_receiver = None;
+        self.fetch_silent = false;
 
         match fetch_result {
             Ok(()) => {
                 self.reset_timers();
                 match self.refresh(true) {
                     Ok(()) => self.set_message("Fetched from origin"),
-                    Err(e) => self.show_error(format!("Refresh failed: {}", e)),
+                    Err(e) => self.show_error(format!("Refresh failed: {e}")),
                 }
             }
-            Err(e) => self.show_error(e),
+            Err(e) if !silent => self.show_error(e),
+            Err(_) => {} // Silent mode: suppress error dialog for auto-fetch
         }
     }
 
@@ -465,7 +499,7 @@ impl App {
         if refresh_config.auto_fetch
             && now.duration_since(self.last_fetch_time).as_secs() >= refresh_config.fetch_interval
         {
-            self.start_fetch(false);
+            self.start_fetch(false, true); // silent=true for auto-fetch
             return;
         }
 
@@ -480,7 +514,8 @@ impl App {
 
     /// Start fetch in background
     /// If `show_message` is true, displays "Fetching from origin..."
-    fn start_fetch(&mut self, show_message: bool) {
+    /// If `silent` is true, errors will not show a dialog (for auto-fetch)
+    fn start_fetch(&mut self, show_message: bool, silent: bool) {
         let (tx, rx) = mpsc::channel();
         let repo_path = self.repo_path.clone();
 
@@ -490,6 +525,7 @@ impl App {
         });
 
         self.fetch_receiver = Some(rx);
+        self.fetch_silent = silent;
         if show_message {
             self.set_message("Fetching from origin...");
         }
@@ -718,7 +754,7 @@ impl App {
             }
             Action::Fetch => {
                 if !self.is_fetching() {
-                    self.start_fetch(true);
+                    self.start_fetch(true, false); // silent=false for manual fetch
                 }
             }
             Action::Checkout => {
