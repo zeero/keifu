@@ -12,7 +12,10 @@ use keifu::{
 
 #[derive(Parser)]
 #[command(name = "keifu")]
-#[command(version, about = "A TUI tool to visualize Git commit graphs with branch genealogy")]
+#[command(
+    version,
+    about = "A TUI tool to visualize Git commit graphs with branch genealogy"
+)]
 struct Cli {}
 
 fn main() -> Result<()> {
