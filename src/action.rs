@@ -17,6 +17,7 @@ pub enum Action {
 
     // Git operations
     Checkout,
+    CopyHash,
     CreateBranch,
     DeleteBranch,
     Fetch,

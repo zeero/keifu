@@ -5,6 +5,7 @@ use std::thread;
 use std::time::Instant;
 
 use anyhow::Result;
+use arboard::Clipboard;
 use ratatui::widgets::ListState;
 
 use git2::Oid;
@@ -699,6 +700,18 @@ impl App {
         Ok(())
     }
 
+    fn do_copy_hash(&mut self) -> Result<()> {
+        if let Some(node) = self.selected_commit_node() {
+            if let Some(commit) = &node.commit {
+                let hash = commit.oid.to_string();
+                let mut clipboard = Clipboard::new()?;
+                clipboard.set_text(hash.clone())?;
+                self.set_message(format!("Copied hash: {}", &hash[0..7]));
+            }
+        }
+        Ok(())
+    }
+
     /// Show an error
     pub fn show_error(&mut self, message: String) {
         self.mode = AppMode::Error { message };
@@ -756,6 +769,9 @@ impl App {
             }
             Action::Checkout => {
                 self.do_checkout()?;
+            }
+            Action::CopyHash => {
+                self.do_copy_hash()?;
             }
             Action::CreateBranch => {
                 self.mode = AppMode::Input {
