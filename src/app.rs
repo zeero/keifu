@@ -186,6 +186,7 @@ pub struct App {
 
     // Flags
     pub should_quit: bool,
+    pub exit_message: Option<String>,
 
     // Status message with auto-clear
     message: Option<String>,
@@ -262,6 +263,7 @@ impl App {
             uncommitted_diff_receiver: None,
             uncommitted_cache_key: None,
             should_quit: false,
+            exit_message: None,
             message: None,
             message_time: None,
             fetch_receiver: None,
@@ -706,7 +708,8 @@ impl App {
                 let hash = commit.oid.to_string();
                 let mut clipboard = Clipboard::new()?;
                 clipboard.set_text(hash.clone())?;
-                self.set_message(format!("Copied hash: {}", &hash[0..7]));
+                self.exit_message = Some(format!("Copied hash: {}", &hash[0..7]));
+                self.should_quit = true;
             }
         }
         Ok(())
