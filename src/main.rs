@@ -68,5 +68,10 @@ fn main() -> Result<()> {
     // Restore terminal
     tui::restore()?;
 
+    // Print message if any
+    if let Some(msg) = app.exit_message {
+        println!("{}", msg);
+    }
+
     Ok(())
 }
